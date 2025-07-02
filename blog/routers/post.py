@@ -8,7 +8,7 @@ from .. import schemas
 from blog.database import get_async_db
 from ..utils.firebase_interactions import upload_file_to_storage, delete_file_from_storage
 from ..utils import generate_random_string
-from ..utils.stored_procedure_strings import _get_recommeneded_post, _get_post, _get_post_history,_get_all_posts,_get_single_post
+from ..utils.stored_procedure_strings import _get_recommeneded_post, _get_post, _get_post_history,_get_all_posts,_get_single_post,_get_all_streams
 
 router = APIRouter()
 
@@ -26,6 +26,26 @@ async def get_single_post(post_id: str, db: AsyncSession = Depends(get_async_db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@router.get('/get-streams/{user_id}', response_model=schemas.AllPost)
+async def get_streams(
+    user_id: str,
+    offset: int = Query(1, ge=0),
+    limit: int = Query(3, gt=0),
+    db: AsyncSession = Depends(get_async_db)
+):
+    try:
+        count_stmt = text("SELECT COUNT(*) FROM posts")
+        result = await db.execute(count_stmt)
+        total_count = result.scalar()
+        cal_offset = (offset - 1) * limit
+        result = await db.execute(_get_all_streams, {"offset": cal_offset, "limit": limit})
+        posts = [dict(row._mapping) for row in result.fetchall()]
+        
+        return schemas.AllPost(posts=posts, numb_found=total_count)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get('/get-posts/{user_id}', response_model=schemas.AllPost)
 async def get_post(
@@ -52,6 +72,7 @@ async def create_post(
     user_id: str = Form(...),
     content: str = Form(...),
     image_url: Optional[str] = Form(None),
+    has_video: Optional[int] = Form(None),
     tags: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
     db: AsyncSession = Depends(get_async_db)
@@ -59,12 +80,16 @@ async def create_post(
     file_name = None
     generated_name = None
     try:
-
+        
+        video_value = 0  
+        if(has_video):
+            video_value = has_video
+            
         post_result = await db.execute(text("""
-        INSERT INTO posts (user_id, content)
-        VALUES (:user_id, :content)
+        INSERT INTO posts (user_id, content, has_video)
+        VALUES (:user_id, :content, :has_video)
         RETURNING id
-        """), {"user_id": user_id, "content": content})
+        """), {"user_id": user_id, "content": content, "has_video":video_value})
 
         create_post = post_result.fetchone()
         post_id = create_post._mapping["id"]

@@ -37,6 +37,7 @@ _get_saved_posts = text("""
         p.content,
         p.created_at,
         p.user_id,
+        p.has_video,
         COALESCE((SELECT user_image FROM users WHERE id = p.user_id), '') AS user_image,
         (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) AS likes,
         (SELECT COUNT(*) FROM saved_posts WHERE post_id = p.id) AS saved,
@@ -109,6 +110,7 @@ _get_post_history = text("""
         p.content,
         p.created_at,
         p.user_id,
+        p.has_video,
         COALESCE((SELECT user_image FROM users WHERE id = p.user_id), '') AS user_image,
         (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) AS likes,
         (SELECT COUNT(*) FROM saved_posts WHERE post_id = p.id) AS saved,
@@ -128,6 +130,7 @@ _get_post = text("""
         p.content,
         p.created_at,
         p.user_id,
+        p.has_video,
         COALESCE((SELECT user_image FROM users WHERE id = p.user_id), '') AS user_image,
         (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) AS likes,
         (SELECT COUNT(*) FROM saved_posts WHERE post_id = p.id) AS saved,
@@ -240,6 +243,7 @@ _get_all_posts = text("""
         p.content,
         p.created_at,
         p.user_id,
+        p.has_video,
         COALESCE((SELECT user_image FROM users WHERE id = p.user_id), '') AS user_image,
         (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) AS likes,
         (SELECT COUNT(*) FROM saved_posts WHERE post_id = p.id) AS saved,
@@ -254,6 +258,42 @@ _get_all_posts = text("""
     FETCH NEXT :limit ROWS ONLY
 """)
 
+# Get all posts
+_get_all_streams = text("""
+    SELECT 
+        p.id AS post_id,
+        p.content,
+        p.created_at,
+        p.user_id,
+        p.has_video,
+        COALESCE(u.user_image, '') AS user_image,
+        (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) AS likes,
+        (SELECT COUNT(*) FROM saved_posts WHERE post_id = p.id) AS saved,
+        (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comments,
+        COALESCE((
+            SELECT STRING_AGG(image_url, ',') 
+            FROM post_images 
+            WHERE post_id = p.id
+        ), '') AS images,
+        COALESCE((
+            SELECT STRING_AGG(tag_name, ',') 
+            FROM tags 
+            WHERE post_id = p.id
+        ), '') AS tags,
+        COALESCE((
+            SELECT STRING_AGG(video_url, ',') 
+            FROM post_videos 
+            WHERE post_id = p.id
+        ), '') AS videos,
+        u.username
+    FROM posts p
+    JOIN users u ON u.id = p.user_id
+    WHERE p.has_video = 1
+    ORDER BY p.created_at DESC
+    OFFSET :offset ROWS
+    FETCH NEXT :limit ROWS ONLY;
+""")
+
 # Get recommended post (sample pattern)
 _get_recommeneded_post = text("""
     SELECT 
@@ -261,6 +301,7 @@ _get_recommeneded_post = text("""
         p.content,
         p.created_at,
         p.user_id,
+        p.has_video,        
         COALESCE((SELECT user_image FROM users WHERE id = p.user_id), '') AS user_image,
         (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) AS likes,
         (SELECT COUNT(*) FROM saved_posts WHERE post_id = p.id) AS saved,
@@ -283,6 +324,7 @@ _get_single_post = text("""
         p.content,
         p.created_at,
         p.user_id,
+        p.has_video,
         COALESCE((SELECT user_image FROM users WHERE id = p.user_id), '') AS user_image,
         (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) AS likes,
         (SELECT COUNT(*) FROM saved_posts WHERE post_id = p.id) AS saved,
@@ -293,6 +335,80 @@ _get_single_post = text("""
         (SELECT username FROM users WHERE id = p.user_id) AS username
     FROM posts p
     WHERE p.id = :currentPostId
+""")
+
+
+_get_messaged_group = text("""
+    WITH user_conversations AS (
+    SELECT cm.conversation_id
+    FROM conversation_members cm
+    WHERE cm.user_id = :current_user_id
+),
+
+other_members AS (
+    SELECT cm.conversation_id, u.id AS user_id, u.username, u.user_image
+    FROM conversation_members cm
+    JOIN users u ON u.id = cm.user_id
+    WHERE cm.conversation_id IN (SELECT conversation_id FROM user_conversations)
+      AND cm.user_id != :current_user_id
+),
+
+last_messages AS (
+    SELECT DISTINCT ON (m.conversation_id)
+        m.conversation_id,
+        m.content AS last_message,
+        m.created_at
+    FROM messages m
+    WHERE m.conversation_id IN (SELECT conversation_id FROM user_conversations)
+    ORDER BY m.conversation_id, m.created_at DESC
+)
+
+SELECT 
+  om.conversation_id,
+  c.name AS conversation_name,
+  om.user_id, 
+  om.username, 
+  om.user_image, 
+  lm.last_message, 
+  lm.created_at
+FROM other_members om
+JOIN last_messages lm ON lm.conversation_id = om.conversation_id
+JOIN conversations c ON c.id = om.conversation_id
+ORDER BY lm.created_at DESC;
+""")
+
+
+_get_group_conversations = text("""
+    WITH user_conversations AS (
+    SELECT cm.conversation_id
+    FROM conversation_members cm
+    WHERE cm.user_id = :current_user_id
+),
+
+group_conversations AS (
+    SELECT c.id AS conversation_id, c.name AS group_name, c.created_at
+    FROM conversations c
+    WHERE c.is_group = 1 AND c.id IN (SELECT conversation_id FROM user_conversations)
+),
+
+last_messages AS (
+    SELECT DISTINCT ON (m.conversation_id)
+        m.conversation_id,
+        m.content AS last_message,
+        m.created_at
+    FROM messages m
+    WHERE m.conversation_id IN (SELECT conversation_id FROM group_conversations)
+    ORDER BY m.conversation_id, m.created_at DESC
+)
+
+SELECT 
+    gc.conversation_id, 
+    gc.group_name, 
+    lm.last_message, 
+    lm.created_at
+FROM group_conversations gc
+LEFT JOIN last_messages lm ON lm.conversation_id = gc.conversation_id
+ORDER BY lm.created_at DESC;
 """)
 
 _get_messaged_friends = text("""

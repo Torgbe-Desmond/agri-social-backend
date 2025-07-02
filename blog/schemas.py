@@ -41,6 +41,7 @@ class GetAllPost(BaseModel):
     likes: int
     saved: int
     user_id:UUID
+    has_video:Optional[int]
     comments: int
     username:str
     images: Optional[str] = None
@@ -210,12 +211,21 @@ class MessageOut(BaseModel):
     conversation_id:UUID
     sender_id: UUID
     content: str
+    username:Optional[str] = None
+    user_image:Optional[str] = None
     created_at: datetime
+    
     
 class SharedConversationUser(BaseModel):
     user_id: UUID
     username: str
     user_image: Optional[str]
+    last_message: Optional[str]
+    created_at: Optional[datetime]
+    
+class SharedConversationGroup(BaseModel):
+    conversation_id: UUID
+    group_name: Optional[str]
     last_message: Optional[str]
     created_at: Optional[datetime]
 
@@ -242,3 +252,8 @@ class SharedConversationUser(BaseModel):
 # ]
 # [parameters: ('87b320b4-123d-4bfb-8021-015a6620cf42',)]
 # (Background on this error at: https://sqlalche.me/e/20/f405)"
+
+
+
+
+

@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from blog.database import get_async_db
 from ..utils.firebase_interactions import upload_file_to_storage, delete_file_from_storage
-from ..utils.stored_procedure_strings import _get_messaged_friends
+from ..utils.stored_procedure_strings import _get_messaged_friends,_get_group_conversations
 import uuid
 import bcrypt
 from uuid import UUID
@@ -63,6 +63,68 @@ async def get_messaged_users(
     return users
 
 
+@router.post("/get-group-conversations/", response_model=List[schemas.SharedConversationGroup])
+async def get_group_conversations(
+    user_id: str = Form(...),
+    db: AsyncSession = Depends(get_async_db),
+):
+    result = await db.execute(_get_group_conversations, {"current_user_id": user_id})
+    users = result.mappings().all()  
+    return users
+
+@router.post("/create-group-conversation/", response_model=schemas.SharedConversationGroup)
+async def create_group_conversation(
+    sender_id: str = Form(...),
+    name: Optional[str] = Form(None),
+    is_group: Optional[int] = Form(None),
+    db: AsyncSession = Depends(get_async_db)
+):
+    try:
+        if not name or is_group is None:
+            raise HTTPException(status_code=400, detail="Please enter all required fields")
+
+        # Step 1: Insert into conversations
+        insert_convo_query = text("""
+            INSERT INTO conversations (name, owner, is_group, created_at)
+            VALUES (:name, :owner, :is_group, NOW())
+            RETURNING id
+        """)
+        result = await db.execute(insert_convo_query, {
+            "name": name,
+            "owner": sender_id,
+            "is_group": is_group
+        })
+        convo_row = result.fetchone()
+        if not convo_row:
+            raise HTTPException(status_code=500, detail="Failed to create conversation")
+        
+        conversation_id = convo_row.id
+
+        # Step 2: Add creator to conversation_members
+        await db.execute(text("""
+            INSERT INTO conversation_members (conversation_id, user_id)
+            VALUES (:conversation_id, :user_id)
+        """), {
+            "conversation_id": conversation_id,
+            "user_id": sender_id
+        })
+
+        await db.commit()
+
+        # Step 3: Fetch and return the created group conversation
+        response_result = await db.execute(_get_group_conversations, {"current_user_id": sender_id})
+        group_conversation = response_result.fetchone()
+        if not group_conversation:
+            raise HTTPException(status_code=404, detail="Group conversation not found")
+
+        return group_conversation
+
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+
+
+
 @router.get("/get-messages/", response_model=List[schemas.MessageOut])
 async def get_messages(
     conversation_id: str,
@@ -70,10 +132,17 @@ async def get_messages(
 ):
     try:
         query = text("""
-            SELECT id, conversation_id, sender_id, content, created_at
-            FROM messages
-            WHERE conversation_id = :conversation_id
-            ORDER BY created_at ASC
+            SELECT 
+            s.id, 
+            s.conversation_id, 
+            s.sender_id, 
+            s.content, 
+            s.created_at,
+            (SELECT username FROM users WHERE id = s.sender_id) AS username,
+            (SELECT user_image FROM users WHERE id = s.sender_id) AS user_image
+            FROM messages s
+            WHERE s.conversation_id = :conversation_id
+            ORDER BY s.created_at ASC
         """)
 
         result = await db.execute(query, {"conversation_id": conversation_id})
@@ -82,10 +151,6 @@ async def get_messages(
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch messages: {str(e)}")
-
-
-
-
 
 
 @router.post('/messages/', response_model=schemas.MessageOut)
@@ -192,9 +257,9 @@ async def send_message(
                     }, to=str(sid))
         # Step 5: Return message using Pydantic schema
         return schemas.MessageOut(
-            id=row.id,
-            conversation_id=row.conversation_id,
-            sender_id=row.sender_id,
+            id=str(row.id),
+            conversation_id=str(row.conversation_id),
+            sender_id=str(row.sender_id),
             content=row.content,
             created_at=row.created_at
         )
