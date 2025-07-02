@@ -1,0 +1,205 @@
+from fastapi import APIRouter, Query, HTTPException, File, UploadFile, Form, Depends, status
+from .. import schemas
+from sqlalchemy import text
+from ..database.models import user_table, predictions_history_table
+from sqlalchemy.ext.asyncio import AsyncSession
+from typing import List, Optional
+from blog.database import get_async_db
+from ..utils.firebase_interactions import upload_file_to_storage, delete_file_from_storage
+from ..utils.stored_procedure_strings import _get_messaged_friends
+import uuid
+import bcrypt
+from uuid import UUID
+
+
+router = APIRouter()
+userMap = {}  # Stores user_id -> socket_id mapping
+
+
+@router.post("/get-conversation/", response_model=Optional[str])
+async def get_conversation(
+    member_ids: List[str] = Form(...),
+    db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        edited_member_ids = member_ids[0].split(",")
+
+        if not edited_member_ids:
+            raise HTTPException(status_code=400, detail="member_ids list cannot be empty.")
+
+        placeholders = ", ".join([f":id_{i}" for i in range(len(edited_member_ids))])
+
+        query = text(f"""
+            SELECT conversation_id
+            FROM conversation_members
+            WHERE user_id IN ({placeholders})
+            GROUP BY conversation_id
+            HAVING COUNT(DISTINCT user_id) = :num_members
+            LIMIT 1
+        """)
+
+        params = {f"id_{i}": member_id for i, member_id in enumerate(edited_member_ids)}
+        params["num_members"] = len(edited_member_ids)
+
+        result = await db.execute(query, params)
+        row = result.first()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="No conversation found for given members.")
+
+        return str(row[0])  # ✅ Convert UUID to string
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+
+
+@router.post("/get-messaged-users/", response_model=List[schemas.SharedConversationUser])
+async def get_messaged_users(
+    user_id: str = Form(...),
+    db: AsyncSession = Depends(get_async_db),
+):
+    result = await db.execute(_get_messaged_friends, {"current_user_id": user_id})
+    users = result.mappings().all()  
+    return users
+
+
+@router.get("/get-messages/", response_model=List[schemas.MessageOut])
+async def get_messages(
+    conversation_id: str,
+    db: AsyncSession = Depends(get_async_db)
+):
+    try:
+        query = text("""
+            SELECT id, conversation_id, sender_id, content, created_at
+            FROM messages
+            WHERE conversation_id = :conversation_id
+            ORDER BY created_at ASC
+        """)
+
+        result = await db.execute(query, {"conversation_id": conversation_id})
+        messages = result.mappings().all()  # returns list of dictionaries
+        return [schemas.MessageOut(**row) for row in messages]
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch messages: {str(e)}")
+
+
+
+
+
+
+@router.post('/messages/', response_model=schemas.MessageOut)
+async def send_message(
+    content: str = Form(...),
+    member_ids: List[str] = Form(...),
+    sender_id: str = Form(...),
+    name: Optional[str] = Form(None),
+    is_group: Optional[int] = Form(None),
+    conversation_id: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_async_db)
+):
+    try:
+        from ..socket_manager import sio,getSocket
+        new_conversation_id = conversation_id
+        edited_member_ids =  member_ids[0].split(",")
+        # Step 1: Create a new conversation if not provided
+        if not conversation_id:
+            columns = []
+            placeholders = []
+            values = {}
+
+            if name:
+                columns.append("name")
+                placeholders.append(":name")
+                values["name"] = name
+
+            if is_group is not None:
+                columns.append("is_group")
+                placeholders.append(":is_group")
+                values["is_group"] = is_group
+
+            columns.append("created_at")
+            placeholders.append("NOW()")
+
+            query = f"""
+                INSERT INTO conversations ({', '.join(columns)})
+                VALUES ({', '.join(placeholders)})
+                RETURNING id
+            """
+
+            result = await db.execute(text(query), values)
+            conversation = result.fetchone()
+
+            if not conversation:
+                raise HTTPException(status_code=500, detail="Failed to create conversation")
+
+            new_conversation_id = conversation.id
+
+            # Step 2: Insert members into conversation_members
+            insert_member_query = text("""
+                INSERT INTO conversation_members (conversation_id, user_id)
+                VALUES (:conversation_id, :user_id)
+            """)
+            for uid in edited_member_ids:
+                await db.execute(insert_member_query, {
+                    "conversation_id": str(new_conversation_id),
+                    "user_id": uid
+                })
+
+        # Step 3: Insert the message
+        insert_msg_query = text("""
+            INSERT INTO messages (conversation_id, sender_id, content, created_at)
+            VALUES (:conversation_id, :sender_id, :content, NOW())
+            RETURNING id, conversation_id, sender_id, content, created_at
+        """)
+        result = await db.execute(insert_msg_query, {
+            "conversation_id": str(new_conversation_id),
+            "sender_id": sender_id,
+            "content": content
+        })
+
+        row = result.fetchone()
+        await db.commit()
+        
+        # query = text("""
+        #     SELECT id, conversation_id, sender_id, content, created_at
+        #     FROM messages
+        #     WHERE conversation_id = :conversation_id
+        #     ORDER BY created_at ASC
+        # """)
+        
+        # result_ = await db.execute(query, {"conversation_id": str(row.conversation_id)})
+        # messages = result_.fetchall()
+        # print(messages)
+
+        if not row:
+            raise HTTPException(status_code=500, detail="Failed to send message")
+
+        # Step 4: Emit real-time message if it's a direct chat
+        if not is_group:
+            receiver_ids = [uid for uid in edited_member_ids if uid != sender_id]
+            if receiver_ids:
+                receiver_id = receiver_ids[0]
+                sid = getSocket(receiver_id)
+
+                if sid:
+                   await sio.emit("chat_response", {
+                        "id": str(row.id),
+                        "conversation_id": str(row.conversation_id),
+                        "sender_id": str(row.sender_id),
+                        "content": row.content,
+                        "created_at": row.created_at.isoformat(),
+                    }, to=str(sid))
+        # Step 5: Return message using Pydantic schema
+        return schemas.MessageOut(
+            id=row.id,
+            conversation_id=row.conversation_id,
+            sender_id=row.sender_id,
+            content=row.content,
+            created_at=row.created_at
+        )
+
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+
