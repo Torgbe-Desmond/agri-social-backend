@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from pathlib import Path
 import uuid
-import tensorflow as tf
+# import tensorflow as tf
 import os
 from dotenv import load_dotenv
 
