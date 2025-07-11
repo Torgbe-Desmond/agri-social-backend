@@ -9,12 +9,16 @@ load_dotenv()
 
 # credentials_path = Path(__file__).parent / "file-transfer-app-74625-firebase-adminsdk-4vum9-d106be7043.json"
 # _credentials = os.getenv("GOOGLE_CREDENTIALS_JSON")
-credentials_path = credentials.Certificate("/etc/secrets/file-transfer-app-74625-firebase-adminsdk-4vum9-d106be7043.json")
+import os
+import firebase_admin
+from firebase_admin import credentials
 
+# Path to the secret file (uploaded via Render's "Secret Files")
+cred_path = "/etc/secrets/file-transfer-app-74625-firebase-adminsdk-4vum9-d106be7043.json"
 
-# Initialize Firebase Admin SDK
+# Initialize Firebase Admin SDK only once
 if not firebase_admin._apps:
-    cred = credentials.Certificate(credentials_path)
+    cred = credentials.Certificate(cred_path)
     firebase_admin.initialize_app(cred, {
         'storageBucket': os.getenv("FIREBASE_STORAGE_BUCKET")
     })
