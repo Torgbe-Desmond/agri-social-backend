@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 from .. import schemas
 from ..utils import (
-    predict_image_class,
+    # predict_image_class,
     generate_random_string,
     download_and_process_file
 )
