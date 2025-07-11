@@ -1,7 +1,7 @@
-import tensorflow as tf
-import numpy as np
+# import tensorflow as tf
+# import numpy as np
 from fastapi import UploadFile
-from PIL import Image
+# from PIL import Image
 import io
 import base64
 import httpx
@@ -41,29 +41,29 @@ def get_connection_string(auth_type, server_name=None, database_name=None, usern
 
 # @#$%1234@#$%____
 
-async def predict_image_class(file_bytes:bytes , model: tf.keras.Model):
-    try:
+# async def predict_image_class(file_bytes:bytes , model: tf.keras.Model):
+#     try:
       
-        # Load image from bytes and resize it
-        image = Image.open(io.BytesIO(file_bytes)).resize((256, 256))
+#         # Load image from bytes and resize it
+#         image = Image.open(io.BytesIO(file_bytes)).resize((256, 256))
 
-        # Convert image to array and prepare input
-        input_arr = tf.keras.preprocessing.image.img_to_array(image)
-        input_arr = np.expand_dims(input_arr, axis=0)
+#         # Convert image to array and prepare input
+#         input_arr = tf.keras.preprocessing.image.img_to_array(image)
+#         input_arr = np.expand_dims(input_arr, axis=0)
 
-        # Make prediction
-        prediction = model.predict(input_arr)
+#         # Make prediction
+#         prediction = model.predict(input_arr)
         
-        # Confidence of the predicted class
-        confidence = float(np.max(prediction))  
+#         # Confidence of the predicted class
+#         confidence = float(np.max(prediction))  
 
-        result_index = np.argmax(prediction)
+#         result_index = np.argmax(prediction)
 
-        return result_index, confidence
+#         return result_index, confidence
 
-    except Exception as e:
-        print(f"Prediction error: {e}")
-        raise
+#     except Exception as e:
+#         print(f"Prediction error: {e}")
+#         raise
     
     
 
