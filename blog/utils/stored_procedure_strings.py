@@ -436,7 +436,7 @@ last_messages AS (
     ORDER BY m.conversation_id, m.created_at DESC
 )
 
-SELECT om.user_id, om.username, om.user_image, lm.last_message, lm.created_at
+SELECT om.conversation_id, om.user_id, om.username, om.user_image, lm.last_message, lm.created_at
 FROM other_members om
 JOIN last_messages lm ON lm.conversation_id = om.conversation_id
 ORDER BY lm.created_at DESC;
