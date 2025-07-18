@@ -219,6 +219,7 @@ class MessageOut(BaseModel):
 class SharedConversationUser(BaseModel):
     user_id: UUID
     username: str
+    conversation_id:UUID
     user_image: Optional[str]
     last_message: Optional[str]
     created_at: Optional[datetime]
