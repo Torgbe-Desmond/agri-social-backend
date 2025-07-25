@@ -1,6 +1,8 @@
 aioodbc
+altair
 annotated-types
 anyio
+astunparse
 asyncpg
 attrs
 bcrypt
@@ -14,6 +16,7 @@ charset-normalizer
 click
 colorama
 cryptography
+ecdsa
 fastapi
 firebase
 firebase-admin
@@ -40,16 +43,20 @@ idna
 Jinja2
 jsonschema
 jsonschema-specifications
-Markdown
+libclang
 markdown-it-py
 MarkupSafe
 mdurl
 msgpack
 namex
 narwhals
+numpy
 optree
 packaging
+pandas
+pillow
 proto-plus
+protobuf
 psycopg2-binary
 pyarrow
 pyasn1
@@ -57,6 +64,7 @@ pyasn1_modules
 pycparser
 pydantic
 pydantic_core
+pydeck
 Pygments
 PyJWT
 pyodbc
@@ -64,6 +72,7 @@ pyparsing
 python-dateutil
 python-dotenv
 python-engineio
+python-jose
 python-multipart
 python-socketio
 pytz
@@ -81,6 +90,7 @@ SQLAlchemy
 starlette
 streamlit
 tenacity
+termcolor
 toml
 tornado
 typing-inspection
