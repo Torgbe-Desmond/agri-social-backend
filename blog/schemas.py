@@ -16,6 +16,7 @@ class User(BaseModel):
     email: str
     created_at: datetime
     city:Optional[str] = None
+    reference_id:UUID
     firstname:Optional[str] = None
     lastname:Optional[str] = None
     user_image:Optional[str]=None
@@ -109,6 +110,10 @@ class Prediction(BaseModel):
     created_at: datetime
     generated_name:Optional[str] = None
 
+class AllPrediction(BaseModel):
+     notifications:List[Prediction]
+     numb_found:int
+    
 # ---------------------- PredictionHistory ----------------------
 class PredictionHistoryCreate(BaseModel):
     user_id: UUID
@@ -128,6 +133,10 @@ class CommentCreate(BaseModel):
     content: str
     created_at: datetime
     
+class AllComment(BaseModel):
+    comments:List[Comment]
+    numb_found:int
+
 class Comment(BaseModel):
     post_id: UUID
     user_id: UUID
@@ -143,6 +152,8 @@ class Notifications(BaseModel):
     actor_id:UUID
     type:str
     entity_id:UUID
+    images:Optional[str] = None
+    videos:Optional[str] = None    
     entity_type:str
     user_image:str
     username:str
@@ -216,12 +227,14 @@ class MessageOut(BaseModel):
     created_at: datetime
     
     
+    
 class SharedConversationUser(BaseModel):
     user_id: UUID
     username: str
     conversation_id:UUID
     user_image: Optional[str]
     last_message: Optional[str]
+    reference_id:UUID
     created_at: Optional[datetime]
     
 class SharedConversationGroup(BaseModel):

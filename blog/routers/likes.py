@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter,Request
 from fastapi import status,Form
 from .. import schemas
 from sqlalchemy import text
@@ -15,31 +15,34 @@ from .. utils.stored_procedure_strings import _get_recommeneded_post
 
 router = APIRouter()
 
-
 @router.post('/toggle-like/{post_id}', status_code=status.HTTP_200_OK)
 async def toggle_like(
+    request:Request,
     post_id: str,
-    user_id: str = Form(...),
     post_owner: str = Form(...),
     db: AsyncSession = Depends(get_async_db)
 ):
     try:
+        current_user = request.state.user
+        like_id = None
+        notification_id = None
+
         # Check if already liked
         result = await db.execute(text("""
             SELECT 1 FROM post_likes WHERE user_id = :user_id AND post_id = :post_id
-        """), {"user_id": user_id, "post_id": post_id})
+        """), {"user_id": current_user.get("user_id"), "post_id": post_id})
         existing_like = result.fetchone()
 
         if existing_like:
             # Unlike
             await db.execute(text("""
                 DELETE FROM post_likes WHERE user_id = :user_id AND post_id = :post_id
-            """), {"user_id": user_id, "post_id": post_id})
+            """), {"user_id": current_user.get("user_id"), "post_id": post_id})
 
             await db.execute(text("""
                 DELETE FROM notifications 
                 WHERE entity_id = :post_id AND actor_id = :user_id AND type = 'like'
-            """), {"post_id": post_id, "user_id": user_id})
+            """), {"post_id": post_id, "user_id": current_user.get("user_id")})
 
             liked = False
         else:
@@ -52,19 +55,19 @@ async def toggle_like(
                 raise HTTPException(status_code=404, detail="Post not found")
             post_content = row.content or ""
 
-            # Like and get inserted post_like ID (optional)
+            # Like and get inserted post_like ID
             insert_like = await db.execute(text("""
                 INSERT INTO post_likes (post_id, user_id, created_at)
                 VALUES (:post_id, :user_id, CURRENT_TIMESTAMP)
                 RETURNING id
             """), {
                 "post_id": post_id,
-                "user_id": user_id,
+                "user_id": current_user.get("user_id"),
             })
             like_row = insert_like.fetchone()
             like_id = like_row.id if like_row else None
 
-            # Insert notification and get its ID
+            # Insert notification
             insert_notif = await db.execute(text("""
                 INSERT INTO notifications (
                     user_id, actor_id, type, entity_type, entity_id,
@@ -76,7 +79,7 @@ async def toggle_like(
                 RETURNING id
             """), {
                 "user_id": post_owner,
-                "actor_id": user_id,
+                "actor_id": current_user.get("user_id"),
                 "type": "like",
                 "entity_type": "post",
                 "entity_id": post_id,
@@ -103,11 +106,12 @@ async def toggle_like(
 
 
 @router.get('/like-history/{user_id}', status_code=status.HTTP_200_OK, response_model=List[schemas.GetAllPost])
-async def like_history(user_id: str, db: AsyncSession = Depends(get_async_db)):
+async def like_history( request:Request, db: AsyncSession = Depends(get_async_db)):
     try:
         # Get liked post IDs
+        current_user = request.state.user
         likes_stmt = text("""SELECT STRING_AGG(post_id, ',') AS post_ids FROM post_likes WHERE user_id = :user_id""")
-        result = await db.execute(likes_stmt, {"user_id": user_id})
+        result = await db.execute(likes_stmt, {"user_id": current_user.get("user_id")})
         post_ids_row = result.fetchone()
         post_ids_str = post_ids_row.post_ids if post_ids_row and post_ids_row.post_ids else ""
 

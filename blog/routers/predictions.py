@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, status, File, UploadFile, Form
+from fastapi import APIRouter, HTTPException, Depends, status, File, UploadFile, Form, Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -10,11 +10,11 @@ import os
 from dotenv import load_dotenv
 
 from .. import schemas
-from ..utils import (
-    # predict_image_class,
-    generate_random_string,
-    download_and_process_file
-)
+# from ..utils import (
+#     # predict_image_class,
+#     # generate_random_string,
+#     # download_and_process_file
+# )
 from ..utils.firebase_interactions import (
     upload_file_to_storage,
     delete_file_from_storage
@@ -26,34 +26,40 @@ load_dotenv()
 router = APIRouter()
 
 # ------------------- GET PREDICTION HISTORY -------------------
-@router.get('/prediction-history/{user_id}', response_model=List[schemas.Prediction], status_code=status.HTTP_200_OK)
-async def get_prediction_history(user_id: str, db: AsyncSession = Depends(get_async_db)):
+@router.get('/prediction-history', response_model=schemas.AllPrediction, status_code=status.HTTP_200_OK)
+async def get_prediction_history(request:Request, db: AsyncSession = Depends(get_async_db)):
     try:
+        current_user = request.state.user
+        
+        count_stmt = text("SELECT COUNT(*) FROM predictions WHERE user_id =:user_id")
+        result = await db.execute(count_stmt,{"user_id", str(current_user.get("user_id"))})
+        total_count = result.scalar()
+        
         stmt = text("""
             SELECT * FROM predictions 
             WHERE user_id = :user_id 
             ORDER BY created_at DESC
         """)
-        result = await db.execute(stmt, {"user_id": user_id})
+        
+        result = await db.execute(stmt, {"user_id": current_user.get("user_id")})
         predictions = result.mappings().all()
         
-        print(predictions)
+        if predictions:
+            return schemas.AllPrediction(prediiction=predictions,numb_found=total_count)
 
-        if not predictions:
-            raise HTTPException(status_code=404, detail="No prediction history found for this user.")
-
-        return predictions
+        return schemas.AllPrediction(prediiction=[],numb_found=0)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
 
 
 # ------------------- GET ONE PREDICTION -------------------
-@router.get('/prediction/{user_id}/one/{prediction_id}', status_code=status.HTTP_200_OK)
-def get_one_prediction_info(prediction_id: str, user_id: str, db: Session = Depends(get_db)):
+@router.get('/prediction/{prediction_id}', status_code=status.HTTP_200_OK)
+def get_one_prediction_info(prediction_id: str,request:Request, db: Session = Depends(get_db)):
     try:
+        current_user = request.state.user
         stmt = text("SELECT * FROM predictions WHERE id = :prediction_id AND user_id = :user_id")
-        result = db.execute(stmt, {"prediction_id": prediction_id, "user_id": user_id}).fetchone()
+        result = db.execute(stmt, {"prediction_id": prediction_id, "user_id": current_user.get("user_id")}).fetchone()
 
         if not result:
             raise HTTPException(status_code=404, detail="No prediction found")
@@ -64,10 +70,11 @@ def get_one_prediction_info(prediction_id: str, user_id: str, db: Session = Depe
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# # ------------------- CREATE PREDICTION -------------------
-# @router.post('/prediction', status_code=status.HTTP_200_OK)
-# async def create_prediction(user_id: str = Form(...), file: UploadFile = File(...), db: AsyncSession = Depends(get_async_db)):
+# ------------------- CREATE PREDICTION -------------------
+# @router.post('/prediction', status_code=status.HTTP_200_OK, response_model=schemas.Prediction)
+# async def create_prediction(request:Request, file: UploadFile = File(...), db: AsyncSession = Depends(get_async_db)):
 #     try:
+#         current_user = request.state.user
 #         prediction_list = [
 #             'Tomato Early Blight',
 #             'Tomato Late Blight',
@@ -81,7 +88,9 @@ def get_one_prediction_info(prediction_id: str, user_id: str, db: Session = Depe
 #         ]
 
 #         model_path = Path(__file__).parent / "trained_tomato_disease_detection_model.h5"
+#         print(model_path)
 #         model = tf.keras.models.load_model(model_path)
+    
 
 #         file_bytes = await file.read()
 #         model_result = await predict_image_class(file_bytes, model)
@@ -98,7 +107,7 @@ def get_one_prediction_info(prediction_id: str, user_id: str, db: Session = Depe
 #         if float(confidence) < 0.85:
 #             return {
 #                 "id": None,
-#                 "user_id": user_id,
+#                 "user_id": current_user.get("user_id"),
 #                 "image_url": None,
 #                 "confidence": confidence,
 #                 "prediction_label": "Could not Predict Image",
@@ -107,7 +116,7 @@ def get_one_prediction_info(prediction_id: str, user_id: str, db: Session = Depe
 #             }
 
 #         result_index = max(0, result_index - 1)
-#         image_url = await upload_file_to_storage(user_id, generated_name, file_bytes, content_type)
+#         image_url = await upload_file_to_storage(current_user.get("user_id"), generated_name, file_bytes, content_type)
 
 #         if not image_url:
 #             raise HTTPException(status_code=404, detail="An error occurred while uploading the file.")
@@ -119,7 +128,7 @@ def get_one_prediction_info(prediction_id: str, user_id: str, db: Session = Depe
 #             RETURNING id
 #         """)
 #         result = await db.execute(stmt, {
-#             "user_id": user_id,
+#             "user_id": current_user.get("user_id"),
 #             "image_url": image_url,
 #             "confidence": confidence,
 #             "prediction_label": prediction_list[result_index],
@@ -129,31 +138,44 @@ def get_one_prediction_info(prediction_id: str, user_id: str, db: Session = Depe
         
 #         created_prediction = result.fetchone()
 #         prediction_id = created_prediction._mapping["id"]
+#         created_at = created_prediction._mapping["created_at"]
         
 #         await db.commit()
-
-#         return {
-#             "id": prediction_id,
-#             "user_id": user_id,
-#             "image_url": image_url,
-#             "confidence": confidence,
-#             "prediction_label": prediction_list[result_index],
-#             "filename": file_name,
-#             "generated_name": generated_name
-#         }
-
+        
+#         return schemas.Prediction(
+#             id=prediction_id,
+#             user_id=current_user.get("user_id"),
+#             image_url=image_url,
+#             confidence=confidence,
+#             prediction_label=prediction_list[result_index],
+#             generated_name=generated_name,
+#             created_at=created_at,
+#         )
+        
 #     except Exception as e:
-#         await delete_file_from_storage(user_id,generated_name)
+#         await delete_file_from_storage(current_user.get("user_id"),generated_name)
 #         await db.rollback()
 #         raise HTTPException(status_code=500, detail=str(e))
 
 
 # ------------------- CREATE PREDICTION FROM POST IMAGE -------------------
 # @router.post('/prediction-disease-image', status_code=status.HTTP_200_OK)
-# async def create_prediction_from_post(post_id: Optional[str] = Form(None), comment_id: Optional[str] = Form(None), db: AsyncSession = Depends(get_async_db)):
+# async def create_prediction_from_post(post_id: Optional[str] = Form(None), db: AsyncSession = Depends(get_async_db)):
 #     try:
 #         prediction_list = [
+#             "Apple  Scab",
+#             "Apple Black Rot",
+#             "Apple Cedar Rust",
+#             "Apple Healthy",
+#             "Grape Black Rot",
+#             "Grape Esca (Black Measles)",
+#             "Grape Leaf Blight (Isariophs Leaf Spot)",
+#             "Grape Healthy",
+#             "Orange Hauanglongbing (Citrus Greening)",
+#             "Strawberry Leaf Scorch",
+#             "Strawberry Healthy"
 #             'Tomato Early Blight',
+#             "Tomato Bacteria Spot"
 #             'Tomato Late Blight',
 #             'Tomato Leaf Mold',
 #             'Tomato Septoria Leaf Spot',
@@ -177,7 +199,7 @@ def get_one_prediction_info(prediction_id: str, user_id: str, db: Session = Depe
 #             if not file_bytes:
 #                 raise HTTPException(status_code=404, detail="Image file could not be downloaded.")
 
-#             model_path = Path(__file__).parent / "trained_tomato_disease_detection_model.h5"
+#             model_path = Path(__file__).parent / "plants_model.h5"
 #             model = tf.keras.models.load_model(model_path)
 
 #             model_result = await predict_image_class(file_bytes, model)

@@ -10,6 +10,7 @@ _get_user_profile = text("""
         u.city,
         u.firstname,
         u.lastname,
+        u.reference_id,
         COALESCE(u.user_image, '') AS user_image,
         (
             SELECT COUNT(*) FROM followers WHERE follower_id = u.id
@@ -32,23 +33,26 @@ _view_notifications = text("""
 
 # Get saved posts
 _get_saved_posts = text("""
-     SELECT 
-        p.id AS post_id,
-        p.content,
-        p.created_at,
-        p.user_id,
-        p.has_video,
-        COALESCE((SELECT user_image FROM users WHERE id = p.user_id), '') AS user_image,
-        (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) AS likes,
-        (SELECT COUNT(*) FROM saved_posts WHERE post_id = p.id) AS saved,
-        (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comments,
-        (SELECT image_url FROM post_images WHERE post_id = p.id LIMIT 1) AS images,
-        (SELECT video_url FROM post_videos WHERE post_id = p.id LIMIT 1) AS videos,
-        (SELECT username FROM users WHERE id = p.user_id) AS username
-    FROM posts p
-    WHERE p.id IN (
+SELECT 
+    p.id AS post_id,
+    p.content,
+    p.created_at,
+    p.user_id,
+    p.has_video,
+    COALESCE((SELECT user_image FROM users WHERE id = p.user_id), '') AS user_image,
+    (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) AS likes,
+    (SELECT COUNT(*) FROM saved_posts WHERE post_id = p.id) AS saved,
+    (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comments,
+    (SELECT image_url FROM post_images WHERE post_id = p.id LIMIT 1) AS images,
+    (SELECT video_url FROM post_videos WHERE post_id = p.id LIMIT 1) AS videos,
+    (SELECT username FROM users WHERE id = p.user_id) AS username
+FROM posts p
+WHERE p.id IN (
     SELECT unnest(string_to_array(:PostIds, ',')::uuid[])
 )
+ORDER BY p.created_at DESC
+OFFSET :offset
+LIMIT :limit;
 """)
 
 # Get product history by user
@@ -120,7 +124,11 @@ _get_post_history = text("""
         COALESCE((SELECT STRING_AGG(video_url, ',') FROM post_videos WHERE post_id = p.id), '') AS videos,
         (SELECT username FROM users WHERE id = p.user_id) AS username
     FROM posts p
-    WHERE p.user_id = :user_id
+    WHERE p.user_id = :user_id 
+    ORDER BY p.created_at DESC
+    OFFSET :offset
+    LIMIT :limit;
+    
 """)
 
 # Get post by ID
@@ -156,6 +164,16 @@ _get_notifications_by_user_id = text("""
         n.message,
         COALESCE((SELECT user_image FROM users WHERE id = n.actor_id), '') AS user_image,
         COALESCE((SELECT username FROM users WHERE id = n.actor_id), '') AS username,
+        COALESCE((
+               SELECT STRING_AGG(image_url, ',') 
+               FROM post_images 
+               WHERE post_id = n.entity_id::uuid
+           ), '') AS images,
+        COALESCE((
+               SELECT STRING_AGG(video_url, ',') 
+               FROM post_videos 
+               WHERE post_id = n.entity_id::uuid
+           ), '') AS videos,        
         n.is_read,
         n.created_at
     FROM notifications n
@@ -412,14 +430,14 @@ ORDER BY lm.created_at DESC;
 """)
 
 _get_messaged_friends = text("""
-    WITH user_conversations AS (
+WITH user_conversations AS (
     SELECT cm.conversation_id
     FROM conversation_members cm
     WHERE cm.user_id = :current_user_id
 ),
 
 other_members AS (
-    SELECT cm.conversation_id, u.id AS user_id, u.username, u.user_image
+    SELECT cm.conversation_id, u.id AS user_id, u.username, u.user_image, u.reference_id
     FROM conversation_members cm
     JOIN users u ON u.id = cm.user_id
     WHERE cm.conversation_id IN (SELECT conversation_id FROM user_conversations)
@@ -436,8 +454,46 @@ last_messages AS (
     ORDER BY m.conversation_id, m.created_at DESC
 )
 
-SELECT om.conversation_id, om.user_id, om.username, om.user_image, lm.last_message, lm.created_at
+SELECT
+    om.conversation_id,
+    om.user_id,
+    om.username,
+    om.user_image,
+    om.reference_id,
+    lm.last_message,
+    lm.created_at
 FROM other_members om
-JOIN last_messages lm ON lm.conversation_id = om.conversation_id
-ORDER BY lm.created_at DESC;
+LEFT JOIN last_messages lm ON lm.conversation_id = om.conversation_id
+ORDER BY lm.created_at DESC NULLS LAST;
 """)
+
+
+
+
+
+# "(sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedFunctionError'>: operator does not exist: uuid = character varying
+# HINT:  No operator matches the given name and argument types. You might need to add explicit type casts.
+# [SQL: 
+#     SELECT 
+#         n.id,
+#         n.user_id,
+#         n.actor_id,
+#         n.type,
+#         n.entity_type,
+#         n.entity_id,
+#         n.action_id,
+#         n.message,
+#         COALESCE((SELECT user_image FROM users WHERE id = n.actor_id), '') AS user_image,
+#         COALESCE((SELECT username FROM users WHERE id = n.actor_id), '') AS username,
+#         COALESCE((SELECT STRING_AGG(image_url, ',') FROM post_images WHERE post_id = n.entity_id ), '') AS images,
+#         n.is_read,
+#         n.created_at
+#     FROM notifications n
+#     INNER JOIN users u ON n.user_id = u.id
+#     WHERE n.user_id = $1
+#     ORDER BY created_at DESC
+#     OFFSET $2 ROWS
+#     FETCH NEXT $3 ROWS ONLY
+# ]
+# [parameters: ('02d91a4a-f8ef-48bc-a9bb-bb192a9b2867', 0, 10)]
+# (Background on this error at: https://sqlalche.me/e/20/f405)"

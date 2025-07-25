@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Query, HTTPException, File, UploadFile, Form, Depends, status
+from fastapi import APIRouter, Query, HTTPException, File, UploadFile, Form, Depends, status, Request
 from .. import schemas
-from sqlalchemy import text
+from sqlalchemy import text,bindparam
 from ..database.models import user_table, predictions_history_table
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
@@ -10,88 +10,97 @@ from ..utils.stored_procedure_strings import _get_messaged_friends,_get_group_co
 import uuid
 import bcrypt
 from uuid import UUID
-
-
 router = APIRouter()
 userMap = {}  # Stores user_id -> socket_id mapping
 
 
-@router.post("/get-conversation/", response_model=Optional[str])
-async def get_conversation(
+
+@router.post("/conversing")
+async def get_messaged_users(
+    request: Request,
     member_ids: List[str] = Form(...),
     db: AsyncSession = Depends(get_async_db),
 ):
     try:
-        edited_member_ids = member_ids[0].split(",")
+        query = text("""
+            SELECT cm.conversation_id
+            FROM conversation_members cm
+            JOIN conversations c ON cm.conversation_id = c.id
+            WHERE cm.user_id IN :user_ids
+              AND c.is_group IS NULL
+            GROUP BY cm.conversation_id
+            HAVING COUNT(DISTINCT cm.user_id) = :user_count
+        """).bindparams(
+            bindparam("user_ids", expanding=True),
+            bindparam("user_count")
+        )
 
-        if not edited_member_ids:
-            raise HTTPException(status_code=400, detail="member_ids list cannot be empty.")
+        result = await db.execute(query, {
+            "user_ids": member_ids,
+            "user_count": 2
+        })
+        
+        row = result.fetchone()
 
-        placeholders = ", ".join([f":id_{i}" for i in range(len(edited_member_ids))])
-
-        query = text(f"""
-            SELECT conversation_id
-            FROM conversation_members
-            WHERE user_id IN ({placeholders})
-            GROUP BY conversation_id
-            HAVING COUNT(DISTINCT user_id) = :num_members
-            LIMIT 1
-        """)
-
-        params = {f"id_{i}": member_id for i, member_id in enumerate(edited_member_ids)}
-        params["num_members"] = len(edited_member_ids)
-
-        result = await db.execute(query, params)
-        row = result.first()
-
-        if not row:
-            raise HTTPException(status_code=404, detail="No conversation found for given members.")
-
-        return str(row[0])  # ✅ Convert UUID to string
+        if row:
+            conversation_id = row.conversation_id
+            print(conversation_id)
+            return {"conversation_id": conversation_id}
+        
+        # If no conversation found
+        return {"conversation_id": None}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
+        
 
 @router.post("/get-messaged-users/", response_model=List[schemas.SharedConversationUser])
 async def get_messaged_users(
-    user_id: str = Form(...),
+    request:Request,
     db: AsyncSession = Depends(get_async_db),
 ):
-    result = await db.execute(_get_messaged_friends, {"current_user_id": user_id})
+    current_user = request.state.user
+    result = await db.execute(_get_messaged_friends, {"current_user_id":current_user.get("user_id")})
     users = result.mappings().all()  
-    return users
+    return users    
 
 
 @router.post("/get-group-conversations/", response_model=List[schemas.SharedConversationGroup])
 async def get_group_conversations(
-    user_id: str = Form(...),
+    request:Request,
     db: AsyncSession = Depends(get_async_db),
-):
-    result = await db.execute(_get_group_conversations, {"current_user_id": user_id})
+):  
+    current_user = request.state.user
+    print("current_user",current_user)
+    result = await db.execute(_get_group_conversations, {"current_user_id": current_user.get("user_id")})
     users = result.mappings().all()  
     return users
 
 @router.post("/create-group-conversation/", response_model=schemas.SharedConversationGroup)
 async def create_group_conversation(
+    request:Request,
     sender_id: str = Form(...),
     name: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
     is_group: Optional[int] = Form(None),
     db: AsyncSession = Depends(get_async_db)
 ):
     try:
+        current_user = request.state.user
         if not name or is_group is None:
             raise HTTPException(status_code=400, detail="Please enter all required fields")
 
         # Step 1: Insert into conversations
         insert_convo_query = text("""
-            INSERT INTO conversations (name, owner, is_group, created_at)
-            VALUES (:name, :owner, :is_group, NOW())
+            INSERT INTO conversations (name, owner, is_group,description, created_at)
+            VALUES (:name, :owner, :is_group,:description, NOW())
             RETURNING id
         """)
         result = await db.execute(insert_convo_query, {
             "name": name,
-            "owner": sender_id,
+            "owner": current_user.get("user_id"),
+            "description":description,
             "is_group": is_group
         })
         convo_row = result.fetchone()
@@ -106,13 +115,13 @@ async def create_group_conversation(
             VALUES (:conversation_id, :user_id)
         """), {
             "conversation_id": conversation_id,
-            "user_id": sender_id
+            "user_id": current_user.get("user_id")
         })
 
         await db.commit()
 
         # Step 3: Fetch and return the created group conversation
-        response_result = await db.execute(_get_group_conversations, {"current_user_id": sender_id})
+        response_result = await db.execute(_get_group_conversations, {"current_user_id": current_user.get("user_id")})
         group_conversation = response_result.fetchone()
         if not group_conversation:
             raise HTTPException(status_code=404, detail="Group conversation not found")
@@ -122,6 +131,46 @@ async def create_group_conversation(
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+
+
+@router.post("/join-group-conversation/", response_model=schemas.SharedConversationGroup)
+async def join_group_conversation(
+    request:Request,
+    conversation_id:str = Form(...),
+    db: AsyncSession = Depends(get_async_db)
+):
+    try:
+        current_user = request.state.user
+        result = await db.execute(text("""
+            SELECT conversation_id,user_id
+            FROM conversation_members 
+            WHERE user_id =:user_id AND conversation_id =:conversation_id
+        """,{
+            "conversation_id": conversation_id,
+            "user_id": current_user.get("user_id") 
+        }))
+        
+        user = result.first()
+        
+        if user:
+            raise HTTPException(status_code=500, detail="You have already joined this group")
+        
+        await db.execute(text("""
+            INSERT INTO conversation_members (conversation_id, user_id)
+            VALUES (:conversation_id, :user_id)
+        """), {
+            "conversation_id": conversation_id,
+            "user_id": current_user.get("user_id")
+        })
+
+        await db.commit()
+
+        return {"message":"group was joined successfully"}
+
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+
 
 
 
@@ -155,9 +204,9 @@ async def get_messages(
 
 @router.post('/messages/', response_model=schemas.MessageOut)
 async def send_message(
+    request:Request,
     content: str = Form(...),
     member_ids: List[str] = Form(...),
-    sender_id: str = Form(...),
     name: Optional[str] = Form(None),
     is_group: Optional[int] = Form(None),
     conversation_id: Optional[str] = Form(None),
@@ -168,6 +217,7 @@ async def send_message(
         new_conversation_id = conversation_id
         edited_member_ids =  member_ids[0].split(",")
         # Step 1: Create a new conversation if not provided
+        current_user = request.state.user
         if not conversation_id:
             columns = []
             placeholders = []
@@ -219,11 +269,22 @@ async def send_message(
         """)
         result = await db.execute(insert_msg_query, {
             "conversation_id": str(new_conversation_id),
-            "sender_id": sender_id,
+            "sender_id": current_user.get("user_id"),
             "content": content
         })
 
         row = result.fetchone()
+        
+        get_user_info_query = await db.execute(text("""
+            SELECT user_image 
+            FROM users
+            WHERE id =:user_id
+        """),{
+            "user_id":current_user.get("user_id")
+        })
+        
+        user_image = get_user_info_query.fetchone()
+    
         await db.commit()
         
         # query = text("""
@@ -242,7 +303,7 @@ async def send_message(
 
         # Step 4: Emit real-time message if it's a direct chat
         if not is_group:
-            receiver_ids = [uid for uid in edited_member_ids if uid != sender_id]
+            receiver_ids = [uid for uid in edited_member_ids if uid != current_user.get("reference_id")]
             if receiver_ids:
                 receiver_id = receiver_ids[0]
                 sid = getSocket(receiver_id)
@@ -254,6 +315,7 @@ async def send_message(
                         "sender_id": str(row.sender_id),
                         "content": row.content,
                         "created_at": row.created_at.isoformat(),
+                        "user_image":user_image
                     }, to=str(sid))
         # Step 5: Return message using Pydantic schema
         return schemas.MessageOut(
@@ -268,3 +330,45 @@ async def send_message(
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
 
+
+@router.post('/create-conversation', status_code=status.HTTP_201_CREATED)
+async def create_conversation(
+    request: Request,
+    member_ids: List[str] = Form(...),
+    db: AsyncSession = Depends(get_async_db)
+):
+    try:
+        # Step 1: Create new conversation
+        query = """
+            INSERT INTO conversations (created_at)
+            VALUES (NOW())
+            RETURNING id
+        """
+        result = await db.execute(text(query))
+        conversation = result.fetchone()
+        if not conversation:
+            raise HTTPException(status_code=500, detail="Failed to create conversation")
+
+        new_conversation_id = conversation[0]  # or conversation.id depending on DB return format
+        
+        # Step 2: Insert members into conversation_members
+        insert_member_query = text("""
+            INSERT INTO conversation_members (conversation_id, user_id)
+            VALUES (:conversation_id, :user_id)
+        """)
+        for uid in member_ids:
+            await db.execute(insert_member_query, {
+                "conversation_id": new_conversation_id,
+                "user_id": uid
+            })
+
+        await db.commit()
+
+        return {
+            "message": "Conversation created successfully",
+            "conversation_id": new_conversation_id
+        }
+
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")

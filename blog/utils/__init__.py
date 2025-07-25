@@ -42,35 +42,35 @@ def get_connection_string(auth_type, server_name=None, database_name=None, usern
 # @#$%1234@#$%____
 
 # async def predict_image_class(file_bytes:bytes , model: tf.keras.Model):
-#     try:
+    try:
       
-#         # Load image from bytes and resize it
-#         image = Image.open(io.BytesIO(file_bytes)).resize((256, 256))
+        # Load image from bytes and resize it
+        image = Image.open(io.BytesIO(file_bytes)).resize((256, 256))
 
-#         # Convert image to array and prepare input
-#         input_arr = tf.keras.preprocessing.image.img_to_array(image)
-#         input_arr = np.expand_dims(input_arr, axis=0)
+        # Convert image to array and prepare input
+        input_arr = tf.keras.preprocessing.image.img_to_array(image)
+        input_arr = np.expand_dims(input_arr, axis=0)
 
-#         # Make prediction
-#         prediction = model.predict(input_arr)
+        # Make prediction
+        prediction = model.predict(input_arr)
         
-#         # Confidence of the predicted class
-#         confidence = float(np.max(prediction))  
+        # Confidence of the predicted class
+        confidence = float(np.max(prediction))  
 
-#         result_index = np.argmax(prediction)
+        result_index = np.argmax(prediction)
 
-#         return result_index, confidence
+        return result_index, confidence
 
-#     except Exception as e:
-#         print(f"Prediction error: {e}")
-#         raise
+    except Exception as e:
+        print(f"Prediction error: {e}")
+        raise
     
     
 
-async def convert_file_to_base64(file: UploadFile):
-    file_bytes = await file.read()
-    base64_encoded = base64.b64encode(file_bytes).decode('utf-8')
-    return base64_encoded
+# async def convert_file_to_base64(file: UploadFile):
+#     file_bytes = await file.read()
+#     base64_encoded = base64.b64encode(file_bytes).decode('utf-8')
+#     return base64_encoded
 
 async def convert_file_url_to_base64(file_url:str):
     async with httpx.AsyncClient() as client:
@@ -93,14 +93,14 @@ def generate_random_string(length=12):
 
 
 
-def download_and_process_file(url: str):
-    # Download file
-    response = requests.get(url, stream=True)
-    if response.status_code != 200:
-        raise Exception("Failed to download file.")
+# def download_and_process_file(url: str):
+#     # Download file
+#     response = requests.get(url, stream=True)
+#     if response.status_code != 200:
+#         raise Exception("Failed to download file.")
 
-    # Get the file bytes
-    file_bytes = response.content
+#     # Get the file bytes
+#     file_bytes = response.content
 
-    return file_bytes
+#     return file_bytes
     
