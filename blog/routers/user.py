@@ -13,26 +13,114 @@ import bcrypt
 
 router = APIRouter()
 
-@router.get('/user-profile', response_model=List[schemas.Search])
-async def get_user_profile( username: str = Query(...), db: AsyncSession = Depends(get_async_db)):
-    query_stmt = text("SELECT id, username, user_image FROM users WHERE username LIKE :username")
-    result = await db.execute(query_stmt, {"username": f"%{username}%"})
-    rows = result.fetchall()
+@router.get('/user-profile')
+async def get_user_profile(
+    username: str = Query(...),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
+    db: AsyncSession = Depends(get_async_db)
+):
+    try:
+        # Search users
+        # username = username.join("+")
+        print(username)
+        
+        user_stmt = text("""
+            SELECT id, username, user_image 
+            FROM users 
+            WHERE username ILIKE :username
+            LIMIT :limit OFFSET :offset
+        """)
+        user_result = await db.execute(user_stmt, {
+            "username": f"%{username}%", "limit": limit, "offset": offset
+        })
+        user_rows = user_result.fetchall()
+        users = [
+            {
+                "type": "user",
+                "user_id": row.id,
+                "username": row.username,
+                "image": row.user_image,
+            }
+            for row in user_rows
+        ]
 
-    if not rows:
-        raise HTTPException(status_code=404, detail="No users found")
+        # Search posts
+        post_stmt = text("""
+            SELECT p.id , u.username, p.content, u.user_image
+            FROM posts p
+            JOIN users u ON u.id = p.user_id
+            WHERE p.content ILIKE :content
+            LIMIT :limit OFFSET :offset
+        """)
+        post_result = await db.execute(post_stmt, {
+            "content": f"%{username}%", "limit": limit, "offset": offset
+        })
+        post_rows = post_result.fetchall()
+        posts = [
+            {
+                "type": "post",
+                "post_id": row.id,
+                "username": row.username,
+                "content": row.content,
+                "image": row.user_image if row.user_image else None,
+            }
+            for row in post_rows
+        ]
+        
+        # Search comments
+        comment_stmt = text("""
+            SELECT c.id , u.username, c.content, u.user_image
+            FROM comments c
+            JOIN users u ON u.id = c.user_id
+            WHERE c.content ILIKE :content
+            LIMIT :limit OFFSET :offset
+        """)
+        comment_result = await db.execute(comment_stmt, {
+            "content": f"%{username}%", "limit": limit, "offset": offset
+        })
+        comment_rows = comment_result.fetchall()
+        comments = [
+            {
+                "type": "comment",
+                "comment_id": row.id,
+                "username": row.username,
+                "content": row.content,
+                "image": row.user_image if row.user_image else None,
+            }
+            for row in comment_rows
+        ]
 
-    users = [
-        {
-            "user_image": row.user_image,
-            "username": row.username,
-            "id": row.id,
-            "num_found": len(rows)
-        }
-        for row in rows
-    ]
-    return users
+        # Search groups
+        # group_stmt = text("""
+        #     SELECT id, group_name as username, group_icon as image
+        #     FROM groups
+        #     WHERE group_name ILIKE :group_name
+        #     LIMIT :limit OFFSET :offset
+        # """)
+        # group_result = await db.execute(group_stmt, {
+        #     "group_name": f"%{username}%", "limit": limit, "offset": offset
+        # })
+        # group_rows = group_result.fetchall()
+        # groups = [
+        #     {
+        #         "type": "group",
+        #         "id": row.id,
+        #         "username": row.username,
+        #         "image": row.image,
+        #     }
+        #     for row in group_rows
+        # ]
 
+        all_results = users + posts + comments
+
+        if not all_results:
+            raise HTTPException(status_code=404, detail="No results found")
+
+        return all_results
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get('/user', response_model=schemas.User)
 async def get_user(request:Request, db: AsyncSession = Depends(get_async_db)):

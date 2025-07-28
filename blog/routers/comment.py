@@ -5,49 +5,89 @@ from typing import Optional
 import uuid
 from .. import schemas
 from blog.database import get_async_db
-from ..utils.stored_procedure_strings import _get_comments, _get_comment
+from ..utils.stored_procedure_strings import _get_comments, _get_comment,_get_replies
 
 router = APIRouter()
 
-@router.get('/get-comments/{post_id}', status_code=status.HTTP_200_OK,response_model=schemas.AllComment)
+@router.get('/get-comments/{post_id}', status_code=status.HTTP_200_OK, response_model = schemas.AllComment)
 async def get_comments(post_id: str, db: AsyncSession = Depends(get_async_db)):
     try:
-        
-        count_stmt = text("""  
+        # Step 1: Get total comment count for the post
+        count_stmt = text("""
             SELECT COUNT(*) 
-            FROM comments c
-            LEFT JOIN users u ON u.id = c.user_id
-            WHERE c.post_id = :ParentOrPostId OR c.parent_id = :ParentOrPostId
-            ORDER BY c.created_at ASC
+            FROM comments
+            WHERE post_id = :post_id 
         """)
-        
-        result = await db.execute(count_stmt,{"ParentOrPostId": post_id})
-        total_count = result.scalar()
-        
-        result = await db.execute(_get_comments, {"ParentOrPostId": post_id})
-        results = result.fetchall()
-        
-        if result:    
-            return schemas.AllComment(comments=results,numb_found=total_count)
+        count_result = await db.execute(count_stmt, {"post_id": post_id})
+        total_count = count_result.scalar()
 
-        return schemas.AllComment(comments=[],numb_found=0)
+        # Step 2: Get all comments and replies
+        result = await db.execute(_get_comments, {"post_id": post_id})
+        rows = result.fetchall()
+        
+        comments = [
+            {
+                "id": str(row.id),
+                "post_id": str(row.post_id),
+                "user_id": str(row.user_id),
+                "likes": row.likes,
+                "username": row.username,
+                "content": row.content,
+                "replies": row.replies,
+                "created_at": row.created_at,
+                "user_image": row.user_image,
+                "parent_id": str(row.parent_id) if row.parent_id else None,
+            }
+            for row in rows
+        ]
+         
+        return schemas.AllComment(
+            comments=comments if comments else [],
+            numb_found=total_count or 0
+        )
 
-        # comments = []
-        # for row in results:
-        #     comments.append({
-        #         "id": row.id,
-        #         "post_id": row.post_id,
-        #         "user_id": row.user_id,
-        #         "likes": row.likes,
-        #         "username": row.username,
-        #         "content": row.content,
-        #         "replies": row.replies,
-        #         "created_at": row.created_at,
-        #         "user_image": row.user_image,
-        #         "parent_id": row.parent_id
-        #     })
-       
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
+
+
+@router.get('/get-replies/{comment_id}', status_code=status.HTTP_200_OK, response_model = schemas.AllComment)
+async def get_comments(comment_id: str, db: AsyncSession = Depends(get_async_db)):
+    try:
+        # Step 1: Get total comment count for the post
+        count_stmt = text("""
+            SELECT COUNT(*) 
+            FROM comments
+            WHERE parent_id = :comment_id
+        """)
+        count_result = await db.execute(count_stmt, {"comment_id": comment_id})
+        total_count = count_result.scalar()
+
+        # Step 2: Get all comments and replies
+        result = await db.execute(_get_replies, {"comment_id": comment_id})
+        rows = result.fetchall()
+        
+        comments = [
+            {
+                "id": str(row.id),
+                "post_id": str(row.post_id),
+                "user_id": str(row.user_id),
+                "likes": row.likes,
+                "username": row.username,
+                "content": row.content,
+                "replies": row.replies,
+                "created_at": row.created_at,
+                "user_image": row.user_image,
+                "parent_id": str(row.parent_id) if row.parent_id else None,
+            }
+            for row in rows
+        ]
+         
+        return schemas.AllComment(
+            comments=comments if comments else [],
+            numb_found=total_count or 0
+        )
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -262,3 +302,12 @@ async def add_reply_comment(
     
     
     
+    
+    
+#     "2 validation errors for AllComment
+# comments.5.parent_id
+#   Input should be a valid string [type=string_type, input_value=UUID('3ad0e888-6a30-497b-8672-270995f6c773'), input_type=UUID]
+#     For further information visit https://errors.pydantic.dev/2.11/v/string_type
+# comments.6.parent_id
+#   Input should be a valid string [type=string_type, input_value=UUID('3ad0e888-6a30-497b-8672-270995f6c773'), input_type=UUID]
+#     For further information visit https://errors.pydantic.dev/2.11/v/string_type"

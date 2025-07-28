@@ -5,15 +5,15 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from pathlib import Path
 import uuid
-# import tensorflow as tf
+import tensorflow as tf
 import os
 from dotenv import load_dotenv
 
 from .. import schemas
 # from ..utils import (
-#     # predict_image_class,
-#     # generate_random_string,
-#     # download_and_process_file
+#     predict_image_class,
+#     generate_random_string,
+#     download_and_process_file
 # )
 from ..utils.firebase_interactions import (
     upload_file_to_storage,
@@ -27,30 +27,32 @@ router = APIRouter()
 
 # ------------------- GET PREDICTION HISTORY -------------------
 @router.get('/prediction-history', response_model=schemas.AllPrediction, status_code=status.HTTP_200_OK)
-async def get_prediction_history(request:Request, db: AsyncSession = Depends(get_async_db)):
+async def get_prediction_history(request: Request, db: AsyncSession = Depends(get_async_db)):
     try:
         current_user = request.state.user
-        
-        count_stmt = text("SELECT COUNT(*) FROM predictions WHERE user_id =:user_id")
-        result = await db.execute(count_stmt,{"user_id", str(current_user.get("user_id"))})
+
+        # Fix 1: Use colon (:) instead of comma in bind parameter
+        count_stmt = text("SELECT COUNT(*) FROM predictions WHERE user_id = :user_id")
+        result = await db.execute(count_stmt, {"user_id": str(current_user.get("user_id"))})
         total_count = result.scalar()
-        
+
+        # Fetch all predictions for the user
         stmt = text("""
             SELECT * FROM predictions 
             WHERE user_id = :user_id 
             ORDER BY created_at DESC
         """)
-        
-        result = await db.execute(stmt, {"user_id": current_user.get("user_id")})
-        predictions = result.mappings().all()
-        
-        if predictions:
-            return schemas.AllPrediction(prediiction=predictions,numb_found=total_count)
+        result = await db.execute(stmt, {"user_id": str(current_user.get("user_id"))})
+        predictions = result.fetchall()
 
-        return schemas.AllPrediction(prediiction=[],numb_found=0)
+        return schemas.AllPrediction(
+            prediction=[row._mapping for row in predictions],
+            numb_found=total_count
+        )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+
 
 
 # ------------------- GET ONE PREDICTION -------------------
@@ -125,7 +127,7 @@ def get_one_prediction_info(prediction_id: str,request:Request, db: Session = De
 #             INSERT INTO predictions 
 #             (user_id, image_url, created_at, confidence, prediction_label, filename, generated_name)
 #             VALUES (:user_id, :image_url, NOW(), :confidence, :prediction_label, :filename, :generated_name)
-#             RETURNING id
+#             RETURNING id,created_at
 #         """)
 #         result = await db.execute(stmt, {
 #             "user_id": current_user.get("user_id"),

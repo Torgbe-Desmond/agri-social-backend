@@ -40,6 +40,11 @@ SELECT
     p.user_id,
     p.has_video,
     COALESCE((SELECT user_image FROM users WHERE id = p.user_id), '') AS user_image,
+    EXISTS (
+           SELECT 1 
+           FROM post_likes  
+           WHERE post_id = p.id::uuid
+       ) AS liked , 
     (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) AS likes,
     (SELECT COUNT(*) FROM saved_posts WHERE post_id = p.id) AS saved,
     (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comments,
@@ -118,7 +123,12 @@ _get_post_history = text("""
         COALESCE((SELECT user_image FROM users WHERE id = p.user_id), '') AS user_image,
         (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) AS likes,
         (SELECT COUNT(*) FROM saved_posts WHERE post_id = p.id) AS saved,
-        (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comments,
+        EXISTS (
+            SELECT 1 
+            FROM post_likes  
+            WHERE post_id = p.id::uuid
+        ) AS liked , 
+        (SELECT COUNT(*) FROM comments WHERE post_id = p.id AND parent_id ISNULL) AS comments,
         COALESCE((SELECT STRING_AGG(image_url, ',') FROM post_images WHERE post_id = p.id), '') AS images,
         COALESCE((SELECT STRING_AGG(tag_name, ',') FROM tags WHERE post_id = p.id), '') AS tags,
         COALESCE((SELECT STRING_AGG(video_url, ',') FROM post_videos WHERE post_id = p.id), '') AS videos,
@@ -128,7 +138,6 @@ _get_post_history = text("""
     ORDER BY p.created_at DESC
     OFFSET :offset
     LIMIT :limit;
-    
 """)
 
 # Get post by ID
@@ -141,8 +150,13 @@ _get_post = text("""
         p.has_video,
         COALESCE((SELECT user_image FROM users WHERE id = p.user_id), '') AS user_image,
         (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) AS likes,
+        EXISTS (
+             SELECT 1 
+             FROM post_likes  
+             WHERE post_id = p.id::uuid
+         ) AS liked ,  
         (SELECT COUNT(*) FROM saved_posts WHERE post_id = p.id) AS saved,
-        (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comments,
+        (SELECT COUNT(*) FROM comments WHERE post_id = p.id AND parent_id ISNULL) AS comments,
         COALESCE((SELECT STRING_AGG(image_url, ',') FROM post_images WHERE post_id = p.id), '') AS images,
         COALESCE((SELECT STRING_AGG(tag_name, ',') FROM tags WHERE post_id = p.id), '') AS tags,
         COALESCE((SELECT STRING_AGG(video_url, ',') FROM post_videos WHERE post_id = p.id), '') AS videos,
@@ -186,7 +200,7 @@ _get_notifications_by_user_id = text("""
 
 # Get comments for a post or comment
 _get_comments = text("""
-    SELECT 
+   SELECT 
         c.id,
         c.post_id,
         c.user_id,
@@ -194,12 +208,41 @@ _get_comments = text("""
         c.created_at,
         COALESCE(u.user_image, '') AS user_image,
         c.parent_id,
+         EXISTS (
+            SELECT 1 
+            FROM comment_likes  
+            WHERE comment_id = c.id::uuid
+        ) AS liked , 
         (SELECT COUNT(*) FROM comments WHERE parent_id = c.id) AS replies,
         (SELECT COUNT(*) FROM comment_likes WHERE comment_id = c.id) AS likes,
         u.username
     FROM comments c
     LEFT JOIN users u ON u.id = c.user_id
-    WHERE c.post_id = :ParentOrPostId OR c.parent_id = :ParentOrPostId
+    WHERE c.post_id = :post_id AND parent_id ISNULL
+    ORDER BY c.created_at ASC
+""")
+
+# Get replies for a post or comment
+_get_replies = text("""
+   SELECT 
+        c.id,
+        c.post_id,
+        c.user_id,
+        c.content,
+        c.created_at,
+        EXISTS (
+            SELECT 1 
+            FROM comment_likes  
+            WHERE comment_id = c.id::uuid
+        ) AS liked , 
+        COALESCE(u.user_image, '') AS user_image,
+        c.parent_id,
+        (SELECT COUNT(*) FROM comments WHERE parent_id = c.id) AS replies,
+        (SELECT COUNT(*) FROM comment_likes WHERE comment_id = c.id) AS likes,
+        u.username
+    FROM comments c
+    LEFT JOIN users u ON u.id = c.user_id
+    WHERE c.parent_id = :comment_id
     ORDER BY c.created_at ASC
 """)
 
@@ -225,6 +268,11 @@ _get_comment = text("""
         c.content,
         c.created_at,
         COALESCE(u.user_image, '') AS user_image,
+        EXISTS (
+            SELECT 1 
+            FROM comment_likes  
+            WHERE comment_id = c.id::uuid
+        ) AS liked , 
         u.username,
         c.parent_id,
         (SELECT COUNT(*) FROM comments WHERE parent_id = c.id) AS replies,
@@ -256,22 +304,27 @@ _get_all_products = text("""
 
 # Get all posts
 _get_all_posts = text("""
-    SELECT 
+ SELECT 
         p.id AS post_id,
         p.content,
         p.created_at,
         p.user_id,
         p.has_video,
-        COALESCE((SELECT user_image FROM users WHERE id = p.user_id), '') AS user_image,
         (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) AS likes,
+        COALESCE((SELECT user_image FROM users WHERE id = p.user_id), '') AS user_image,
+        EXISTS (
+               SELECT 1 
+               FROM post_likes  
+               WHERE post_id = p.id
+           ) AS liked ,  
         (SELECT COUNT(*) FROM saved_posts WHERE post_id = p.id) AS saved,
-        (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comments,
+        (SELECT COUNT(*) FROM comments WHERE post_id = p.id AND parent_id ISNULL ) AS comments,
         COALESCE((SELECT STRING_AGG(image_url, ',') FROM post_images WHERE post_id = p.id), '') AS images,
         COALESCE((SELECT STRING_AGG(tag_name, ',') FROM tags WHERE post_id = p.id), '') AS tags,
         COALESCE((SELECT STRING_AGG(video_url, ',') FROM post_videos WHERE post_id = p.id), '') AS videos,
         (SELECT username FROM users WHERE id = p.user_id) AS username
     FROM posts p
-    ORDER BY created_at DESC
+    ORDER BY p.created_at DESC
     OFFSET :offset ROWS
     FETCH NEXT :limit ROWS ONLY
 """)
@@ -287,6 +340,11 @@ _get_all_streams = text("""
         COALESCE(u.user_image, '') AS user_image,
         (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) AS likes,
         (SELECT COUNT(*) FROM saved_posts WHERE post_id = p.id) AS saved,
+        EXISTS (
+            SELECT 1 
+            FROM post_likes  
+            WHERE post_id = p.id
+        ) AS liked , 
         (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comments,
         COALESCE((
             SELECT STRING_AGG(image_url, ',') 
@@ -345,8 +403,13 @@ _get_single_post = text("""
         p.has_video,
         COALESCE((SELECT user_image FROM users WHERE id = p.user_id), '') AS user_image,
         (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) AS likes,
+        EXISTS (
+            SELECT 1 
+            FROM post_likes  
+            WHERE post_id = p.id
+        ) AS liked , 
         (SELECT COUNT(*) FROM saved_posts WHERE post_id = p.id) AS saved,
-        (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comments,
+        (SELECT COUNT(*) FROM comments WHERE post_id = p.id AND parent_id ISNULL ) AS comments,
         (SELECT image_url FROM post_images WHERE post_id = p.id LIMIT 1) AS images,
         COALESCE((SELECT STRING_AGG(tag_name, ',') FROM tags WHERE post_id = p.id), '') AS tags,
         (SELECT video_url FROM post_videos WHERE post_id = p.id LIMIT 1) AS videos,

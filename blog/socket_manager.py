@@ -35,6 +35,9 @@ async def disconnect(sid):
             del userMap[uid]
             print(f"🗑️ Removed {uid} from userMap")
             break
+        
+    await sio.leave_room(sid, "post_footer_notifications")
+    print(f"🚪 {sid} left 'post_footer_notifications'")
 
 @sio.event
 async def chat_message(sid, data):
@@ -44,15 +47,16 @@ async def chat_message(sid, data):
 @sio.on("user")
 async def user_connection(sid, data):
     user_id = data.get("user_id")
+    group = data.get("room")  # e.g., "math101"
+
     if user_id:
         userMap[user_id] = sid
-        print(f"👤 User connected: {user_id} on socket ID: {sid}")
         print("📌 Current userMap:", userMap)
-    else:
-        print("⚠️ Missing user_id in connection payload")
-        
 
-
+        if group:
+            # This automatically creates the room and adds the user
+            await sio.enter_room(sid, group)
+            print(f"✅ {user_id} joined group '{group}'")
 
 
 
@@ -164,3 +168,4 @@ async def like_notification(sid, data):
             await sio.emit("receive_like_notification", {
                 "error": str(e)
             }, to=sid)
+

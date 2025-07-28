@@ -41,6 +41,7 @@ class GetAllPost(BaseModel):
     created_at: datetime
     likes: int
     saved: int
+    liked:Optional[bool] = None
     user_id:UUID
     has_video:Optional[int]
     comments: int
@@ -74,24 +75,7 @@ class PostImage(BaseModel):
     post_id: UUID
     image_url: str
 
-# ---------------------- Comments ----------------------
 
-class Comment(BaseModel):
-    id: UUID
-    post_id: UUID
-    user_id: UUID
-    likes:int
-    username:str
-    content: str
-    replies:int
-    created_at: datetime
-    user_image:Optional[str] = None
-    parent_id:Optional[str] = None
-
-class CommentCreate(BaseModel):
-    post_id: UUID
-    user_id: UUID
-    content: str
 
 # ---------------------- Predictions ----------------------
 
@@ -133,16 +117,26 @@ class CommentCreate(BaseModel):
     content: str
     created_at: datetime
     
+class Comment(BaseModel):
+    id: UUID
+    post_id: UUID
+    user_id: UUID
+    likes:int
+    liked:Optional[bool] = None
+    username:str
+    content: str
+    replies:int
+    created_at: datetime
+    user_image:Optional[str] = None
+    parent_id:Optional[str] = None
+    
 class AllComment(BaseModel):
     comments:List[Comment]
     numb_found:int
+    
+# ---------------------- Comments ----------------------
 
-class Comment(BaseModel):
-    post_id: UUID
-    user_id: UUID
-    content: str
-    created_at: datetime
-    username:str
+
     
     
 # ---------------------- notifications ----------------------
