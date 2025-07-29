@@ -134,9 +134,9 @@ async def get_user(request:Request, db: AsyncSession = Depends(get_async_db)):
     return user  # ✅ This is now a dict that matches your schema
 
 
-@router.get('/another-user/{user_id}', response_model=schemas.User)
+@router.get('/another-user/{user_id}', response_model=schemas.AnotherUser)
 async def get_user(user_id:str, db: AsyncSession = Depends(get_async_db)):
-    result = await db.execute(_get_user_profile, {"userId": user_id})
+    result = await db.execute(_get_another_user_profile, {"userId": user_id})
     user = result.mappings().fetchone()
 
     if not user:

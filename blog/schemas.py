@@ -15,6 +15,20 @@ class User(BaseModel):
     username: str
     email: str
     created_at: datetime
+    notification_count:int
+    city:Optional[str] = None
+    reference_id:UUID
+    firstname:Optional[str] = None
+    lastname:Optional[str] = None
+    user_image:Optional[str]=None
+    followers:Optional[int] = None
+    following:Optional[int]=None
+    
+class AnotherUser(BaseModel):
+    id: UUID  # ← change this from str to UUID
+    username: str
+    email: str
+    created_at: datetime
     city:Optional[str] = None
     reference_id:UUID
     firstname:Optional[str] = None
@@ -40,8 +54,9 @@ class GetAllPost(BaseModel):
     content: str
     created_at: datetime
     likes: int
-    saved: int
+    saves: int
     liked:Optional[bool] = None
+    saved:Optional[bool] = None
     user_id:UUID
     has_video:Optional[int]
     comments: int
@@ -123,6 +138,7 @@ class Comment(BaseModel):
     user_id: UUID
     likes:int
     liked:Optional[bool] = None
+    saved:Optional[bool] = None
     username:str
     content: str
     replies:int
@@ -239,29 +255,6 @@ class SharedConversationGroup(BaseModel):
 
     
     
-# "(sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedFunctionError'>: function isnull(character varying, unknown) does not exist
-# HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-# [SQL: 
-#     SELECT 
-#         p.id AS post_id,
-#         p.content,
-#         p.created_at,
-#         p.user_id,
-#         ISNULL((SELECT user_image FROM users WHERE id = p.user_id), '') AS user_image,
-#         (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) AS likes,
-#         (SELECT COUNT(*) FROM saved_posts WHERE post_id = p.id) AS saved,
-#         (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comments,
-#         ISNULL((SELECT STRING_AGG(image_url, ',') FROM post_images WHERE post_id = p.id), '') AS images,
-#         ISNULL((SELECT STRING_AGG(tag_name, ',') FROM tags WHERE post_id = p.id), '') AS tags,
-#         ISNULL((SELECT STRING_AGG(video_url, ',') FROM post_videos WHERE post_id = p.id), '') AS videos,
-#         (SELECT username FROM users WHERE id = p.user_id) AS username
-#     FROM posts p
-#     WHERE p.id = $1
-# ]
-# [parameters: ('87b320b4-123d-4bfb-8021-015a6620cf42',)]
-# (Background on this error at: https://sqlalche.me/e/20/f405)"
-
-
 
 
 

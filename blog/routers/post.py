@@ -12,9 +12,10 @@ from ..utils.stored_procedure_strings import _get_recommeneded_post, _get_post, 
 router = APIRouter()
 
 @router.get('/get-single-post/{post_id}', response_model=schemas.GetAllPost)
-async def get_single_post(post_id: str, db: AsyncSession = Depends(get_async_db)):
+async def get_single_post(request:Request, post_id: str, db: AsyncSession = Depends(get_async_db)):
     try:
-        result = await db.execute(_get_single_post, {"currentPostId": post_id})
+        current_user = request.state.user
+        result = await db.execute(_get_single_post, {"currentPostId": post_id, "current_user_id":current_user.get("user_id")})
         post = result.fetchone()
 
         if not post:
@@ -39,7 +40,7 @@ async def get_streams(
         result = await db.execute(count_stmt)
         total_count = result.scalar()
         cal_offset = (offset - 1) * limit
-        result = await db.execute(_get_all_streams, {"offset": cal_offset, "limit": limit})
+        result = await db.execute(_get_all_streams, {"offset": cal_offset, "limit": limit,"current_user_id":current_user.get("user_id")})
         posts = [dict(row._mapping) for row in result.fetchall()]
         
         return schemas.AllPost(posts=posts, numb_found=total_count)
@@ -61,7 +62,7 @@ async def get_post(
         result = await db.execute(count_stmt)
         total_count = result.scalar()
         cal_offset = (offset - 1) * limit
-        result = await db.execute(_get_all_posts, {"offset": cal_offset, "limit": limit})
+        result = await db.execute(_get_all_posts, {"offset": cal_offset, "limit": limit,"current_user_id":current_user.get("user_id")})
     
         if result:
             posts = [dict(row._mapping) for row in result.fetchall()]
@@ -145,25 +146,26 @@ async def create_post(
 
         await db.commit()
 
-        result = await db.execute(_get_single_post, {"currentPostId": str(post_id)})
+        result = await db.execute(_get_single_post, {"currentPostId": str(post_id),"current_user_id":current_user.get("user_id")})
         created_post = result.fetchone()
         # return created_post._mapping
  
-        return schemas.GetAllPost(
-            post_id=created_post.post_id,
-            content=created_post.content,
-            created_at=created_post.created_at,
-            likes=created_post.likes,
-            saved=created_post.saved,
-            user_id=created_post.user_id,
-            has_video=created_post.has_video,
-            comments=created_post.comments,
-            username=created_post.username,
-            images=created_post.images,
-            tags=created_post.tags,
-            videos=created_post.videos,
-            user_image=created_post.user_image,
-        )
+        return {
+            "post_id": str(created_post.post_id),
+            "content": created_post.content,
+            "created_at": created_post.created_at,
+            "likes": created_post.likes,
+            "saves": created_post.saves,
+            "saved": created_post.saved,
+            "user_id": str(created_post.user_id),
+            "has_video": created_post.has_video,
+            "comments": created_post.comments,
+            "username": created_post.username,
+            "images": created_post.images,
+            "tags": created_post.tags,
+            "videos": created_post.videos,
+            "user_image": created_post.user_image,
+        }
 
     except Exception as e:
         await db.rollback()
@@ -229,7 +231,7 @@ async def post_history(
 
         # Fetch post history
         result = await db.execute(_get_post_history, {"user_id": user_id, "offset": cal_offset,
-            "limit": limit})
+            "limit": limit , "current_user_id":user_id})
         posts = result.fetchall()
 
         return schemas.AllPost(

@@ -85,7 +85,6 @@ async def saved_history(
         })
 
         saved_posts = result.fetchall()
-        print("saved_posts",saved_posts)
 
         return schemas.AllPost(
             posts=[row._mapping for row in saved_posts] if saved_posts else [],

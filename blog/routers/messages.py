@@ -202,53 +202,35 @@ async def get_messages(
         raise HTTPException(status_code=500, detail=f"Failed to fetch messages: {str(e)}")
 
 
+
 @router.post('/messages/', response_model=schemas.MessageOut)
 async def send_message(
-    request:Request,
+    request: Request,
     content: str = Form(...),
     member_ids: List[str] = Form(...),
-    name: Optional[str] = Form(None),
-    is_group: Optional[int] = Form(None),
     conversation_id: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_async_db)
 ):
     try:
-        from ..socket_manager import sio,getSocket
+        from ..socket_manager import sio, getSocket
+
         new_conversation_id = conversation_id
-        edited_member_ids =  member_ids[0].split(",")
-        # Step 1: Create a new conversation if not provided
+        edited_member_ids = member_ids[0].split(",")
         current_user = request.state.user
+
+        # Step 1: Create new conversation if not provided
         if not conversation_id:
-            columns = []
-            placeholders = []
-            values = {}
-
-            if name:
-                columns.append("name")
-                placeholders.append(":name")
-                values["name"] = name
-
-            if is_group is not None:
-                columns.append("is_group")
-                placeholders.append(":is_group")
-                values["is_group"] = is_group
-
-            columns.append("created_at")
-            placeholders.append("NOW()")
-
-            query = f"""
-                INSERT INTO conversations ({', '.join(columns)})
-                VALUES ({', '.join(placeholders)})
+            result = await db.execute(text("""
+                INSERT INTO conversations (created_at)
+                VALUES (NOW())
                 RETURNING id
-            """
-
-            result = await db.execute(text(query), values)
+            """))
             conversation = result.fetchone()
 
             if not conversation:
                 raise HTTPException(status_code=500, detail="Failed to create conversation")
 
-            new_conversation_id = conversation.id
+            new_conversation_id = conversation._mapping["id"]
 
             # Step 2: Insert members into conversation_members
             insert_member_query = text("""
@@ -274,61 +256,50 @@ async def send_message(
         })
 
         row = result.fetchone()
-        
-        get_user_info_query = await db.execute(text("""
-            SELECT user_image 
-            FROM users
-            WHERE id =:user_id
-        """),{
-            "user_id":current_user.get("user_id")
-        })
-        
-        user_image = get_user_info_query.fetchone()
-    
-        await db.commit()
-        
-        # query = text("""
-        #     SELECT id, conversation_id, sender_id, content, created_at
-        #     FROM messages
-        #     WHERE conversation_id = :conversation_id
-        #     ORDER BY created_at ASC
-        # """)
-        
-        # result_ = await db.execute(query, {"conversation_id": str(row.conversation_id)})
-        # messages = result_.fetchall()
-        # print(messages)
-
         if not row:
             raise HTTPException(status_code=500, detail="Failed to send message")
 
-        # Step 4: Emit real-time message if it's a direct chat
-        if not is_group:
-            receiver_ids = [uid for uid in edited_member_ids if uid != current_user.get("reference_id")]
-            if receiver_ids:
-                receiver_id = receiver_ids[0]
-                sid = getSocket(receiver_id)
+        # Step 4: Get sender's image
+        get_user_info_query = await db.execute(text("""
+            SELECT user_image 
+            FROM users
+            WHERE id = :user_id
+        """), {
+            "user_id": current_user.get("user_id")
+        })
+        user_image_row = get_user_info_query.fetchone()
+        user_image = user_image_row._mapping["user_image"] if user_image_row else None
 
-                if sid:
-                   await sio.emit("chat_response", {
-                        "id": str(row.id),
-                        "conversation_id": str(row.conversation_id),
-                        "sender_id": str(row.sender_id),
-                        "content": row.content,
-                        "created_at": row.created_at.isoformat(),
-                        "user_image":user_image
-                    }, to=str(sid))
-        # Step 5: Return message using Pydantic schema
+        await db.commit()
+
+        # Step 5: Emit message via socket (direct chat only)
+        receiver_ids = [uid for uid in edited_member_ids if uid != current_user.get("reference_id")]
+        if receiver_ids:
+            receiver_id = receiver_ids[0]
+            sid = getSocket(receiver_id)
+            if sid:
+                await sio.emit("chat_response", {
+                    "id": str(row._mapping["id"]),
+                    "conversation_id": str(row._mapping["conversation_id"]),
+                    "sender_id": str(row._mapping["sender_id"]),
+                    "content": row._mapping["content"],
+                    "created_at": row._mapping["created_at"].isoformat(),
+                    "user_image": user_image
+                }, to=str(sid))
+
+        # Step 6: Return message response
         return schemas.MessageOut(
-            id=str(row.id),
-            conversation_id=str(row.conversation_id),
-            sender_id=str(row.sender_id),
-            content=row.content,
-            created_at=row.created_at
+            id=str(row._mapping["id"]),
+            conversation_id=str(row._mapping["conversation_id"]),
+            sender_id=str(row._mapping["sender_id"]),
+            content=row._mapping["content"],
+            created_at=row._mapping["created_at"]
         )
 
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+
 
 
 @router.post('/create-conversation', status_code=status.HTTP_201_CREATED)

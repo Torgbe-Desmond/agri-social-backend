@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # cred_path = Path(__file__).parent / "file-transfer-app-74625-firebase-adminsdk-4vum9-d106be7043.json"
-# _credentials = os.getenv("GOOGLE_CREDENTIALS_JSON")
+_credentials = os.getenv("GOOGLE_CREDENTIALS_JSON")
 import os
 import firebase_admin
 from firebase_admin import credentials
