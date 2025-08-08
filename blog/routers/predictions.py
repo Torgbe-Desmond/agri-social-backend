@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from pathlib import Path
 import uuid
-import tensorflow as tf
+# import tensorflow as tf
 import os
 from dotenv import load_dotenv
 
@@ -26,7 +26,7 @@ load_dotenv()
 router = APIRouter()
 
 # ------------------- GET PREDICTION HISTORY -------------------
-@router.get('/prediction-history', response_model=schemas.AllPrediction, status_code=status.HTTP_200_OK)
+@router.get('/predictions', response_model=schemas.AllPrediction, status_code=status.HTTP_200_OK)
 async def get_prediction_history(request: Request, db: AsyncSession = Depends(get_async_db)):
     try:
         current_user = request.state.user
@@ -46,8 +46,8 @@ async def get_prediction_history(request: Request, db: AsyncSession = Depends(ge
         predictions = result.fetchall()
 
         return schemas.AllPrediction(
-            prediction=[row._mapping for row in predictions],
-            numb_found=total_count
+            predictions=[row._mapping for row in predictions] if predictions else [],
+            numb_found=total_count or 0
         )
 
     except Exception as e:

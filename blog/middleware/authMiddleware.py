@@ -13,7 +13,7 @@ from starlette.responses import JSONResponse
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # Allow unauthenticated access to login or register endpoints
-        public_paths = ["/login", "/register"]
+        public_paths = ["/auth/login", "/auth/register"]
         if request.url.path in public_paths:
             return await call_next(request)
 

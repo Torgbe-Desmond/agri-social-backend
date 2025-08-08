@@ -12,7 +12,7 @@ from ..utils.stored_procedure_strings import _get_product, _get_product_history,
 
 router = APIRouter()
 
-@router.get('/product/{product_id}', status_code=status.HTTP_200_OK, response_model=schemas.Products)
+@router.get('/products/{product_id}', status_code=status.HTTP_200_OK, response_model=schemas.Products)
 async def get_product(product_id: str, db: AsyncSession = Depends(get_async_db)):
     try:
         result = await db.execute(_get_product, {"product_id": product_id})
@@ -23,8 +23,9 @@ async def get_product(product_id: str, db: AsyncSession = Depends(get_async_db))
         return dict(zip(column_names, row))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
 
-@router.get('/user-products', status_code=status.HTTP_200_OK, response_model=schemas.AllProducts)
+@router.get('/products/user', status_code=status.HTTP_200_OK, response_model=schemas.AllProducts)
 async def get_user_products(request:Request, db: AsyncSession = Depends(get_async_db)):
     try:
         current_user = request.state.user
@@ -71,7 +72,7 @@ async def get_all_products(offset: int = Query(1, ge=0), limit: int = Query(10, 
 
 
 
-@router.get('/search-products', status_code=status.HTTP_200_OK)
+@router.get('/products/search', status_code=status.HTTP_200_OK)
 async def search_products(query: str, db: AsyncSession = Depends(get_async_db)):
     try:
         search_stmt = text("""
@@ -85,7 +86,7 @@ async def search_products(query: str, db: AsyncSession = Depends(get_async_db)):
 
 
 
-@router.post('/create-products', status_code=status.HTTP_200_OK, response_model=schemas.Products)
+@router.post('/products', status_code=status.HTTP_200_OK, response_model=schemas.Products)
 async def create_product(
     request:Request,
     title: str = Form(...),
@@ -161,7 +162,7 @@ async def create_product(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put('/update-product/{product_id}', status_code=status.HTTP_200_OK)
+@router.put('/products/{product_id}', status_code=status.HTTP_200_OK)
 async def update_product(
     product_id: str,
     request:Request,
@@ -231,7 +232,7 @@ async def update_product(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete('/delete-product/{product_id}', status_code=status.HTTP_200_OK)
+@router.delete('/products/{product_id}', status_code=status.HTTP_200_OK)
 async def delete_product(product_id: str, db: AsyncSession = Depends(get_async_db)):
     try:
         delete_stmt = text("DELETE FROM products WHERE id = :product_id")

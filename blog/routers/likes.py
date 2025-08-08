@@ -16,7 +16,7 @@ from .. utils.stored_procedure_strings import _get_recommeneded_post
 router = APIRouter()
 
 
-@router.post('/toggle-like/{post_id}', status_code=status.HTTP_200_OK)
+@router.post('/posts/{post_id}/like', status_code=status.HTTP_200_OK)
 async def toggle_like(
     request: Request,
     post_id: str,

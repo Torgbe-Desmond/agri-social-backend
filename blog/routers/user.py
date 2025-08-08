@@ -13,7 +13,9 @@ import bcrypt
 
 router = APIRouter()
 
-@router.get('/user-profile')
+
+
+@router.get('/user/profile')
 async def get_user_profile(
     username: str = Query(...),
     offset: int = Query(0, ge=0),
@@ -121,6 +123,18 @@ async def get_user_profile(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+    
+@router.get('/profile/{user_id}', response_model=schemas.User)
+async def get_profile_by_user_id(user_id:str, db: AsyncSession = Depends(get_async_db)):
+    print("user_id",user_id)
+    result = await db.execute(_get_user_profile, {"userId": user_id})
+    user = result.mappings().fetchone()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="No users found")
+
+    return user 
 
 @router.get('/user', response_model=schemas.User)
 async def get_user(request:Request, db: AsyncSession = Depends(get_async_db)):
@@ -134,26 +148,18 @@ async def get_user(request:Request, db: AsyncSession = Depends(get_async_db)):
     return user  # ✅ This is now a dict that matches your schema
 
 
-@router.get('/another-user/{user_id}', response_model=schemas.User)
-async def get_user(user_id:str, db: AsyncSession = Depends(get_async_db)):
-    result = await db.execute(_get_user_profile, {"userId": user_id})
-    user = result.mappings().fetchone()
 
-    if not user:
-        raise HTTPException(status_code=404, detail="No users found")
-
-    return user  # ✅ This is now a dict that matches your schema
-
-
-@router.get('/new-followers', response_model=schemas.AllFollowers)
-async def get_more_active_followers(
-    request:Request,
+@router.get('/user/suggested', response_model=schemas.AllFollowers)
+async def get_suggested_users_to_follow(
+    request: Request,
     offset: int = Query(1, ge=1),
     limit: int = Query(3, gt=0),
     db: AsyncSession = Depends(get_async_db)
 ):
     try:
-        current_user = request.state.user 
+        current_user = request.state.user
+
+        # Get total count
         get_followers_count_stmt = text("""
             SELECT COUNT(*) 
             FROM users 
@@ -166,6 +172,7 @@ async def get_more_active_followers(
         total_count_result = await db.execute(get_followers_count_stmt, {"user_id": current_user.get("user_id")})
         total_count = total_count_result.scalar()
 
+        # Get followers
         cal_offset = (offset - 1) * limit
 
         get_followers_stmt = text("""
@@ -186,7 +193,19 @@ async def get_more_active_followers(
             "offset": cal_offset,
             "limit": limit
         })
-        followers = result.fetchall()
+        followers_raw = result.fetchall()
+
+        # Convert each Row to a dict, then to Follower
+        followers = [
+            schemas.Follower(
+                id=row.id,
+                firstname=row.firstname,
+                lastname=row.lastname,
+                username=row.username,
+                user_image=row.user_image
+            )
+            for row in followers_raw
+        ]
 
         return schemas.AllFollowers(followers=followers, numb_found=total_count)
 
@@ -194,7 +213,7 @@ async def get_more_active_followers(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/update-user-profile-image")
+@router.put("/user/image")
 async def update_user_profile(request:Request, file: UploadFile = File(...), db: AsyncSession = Depends(get_async_db)):
     file_name = file.filename
     try:
@@ -218,7 +237,7 @@ async def update_user_profile(request:Request, file: UploadFile = File(...), db:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/register", status_code=status.HTTP_201_CREATED, response_model=schemas.User)
+@router.post("auth/register", status_code=status.HTTP_201_CREATED, response_model=schemas.User)
 async def register(username: str = Form(...),email: str = Form(...),password: str = Form(...), db: AsyncSession = Depends(get_async_db)):
     try:
         # Check if username exists
@@ -261,7 +280,7 @@ async def register(username: str = Form(...),email: str = Form(...),password: st
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put('/update-user')
+@router.put('/user/update')
 async def update_user(
     request:Request,
     username: Optional[str] = Form(None),
@@ -329,8 +348,7 @@ async def update_user(
 
 
 
-
-@router.post("/login")
+@router.post("/auth/login")
 async def login(
     email: str = Form(...),
     password: str = Form(...),
@@ -381,8 +399,8 @@ async def is_following(user_id: str, request:Request, db: AsyncSession = Depends
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/follow/{user_id}")
-async def toggle_follow(user_id: str, request:Request, db: AsyncSession = Depends(get_async_db)):
+@router.post("/follow") 
+async def toggle_follow(request:Request,user_id: str = Form(...), db: AsyncSession = Depends(get_async_db)):
     try:
         current_user = request.state.user
         result = await db.execute(text("""

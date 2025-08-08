@@ -5,17 +5,18 @@ from ..database.models import user_table, predictions_history_table
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from blog.database import get_async_db
-from ..utils.firebase_interactions import upload_file_to_storage, delete_file_from_storage
 from ..utils.stored_procedure_strings import _get_messaged_friends,_get_group_conversations
 import uuid
 import bcrypt
+from ..utils import generate_random_string
 from uuid import UUID
 router = APIRouter()
 userMap = {}  # Stores user_id -> socket_id mapping
+from ..utils.firebase_interactions import upload_file_to_storage, delete_file_from_storage
 
 
 
-@router.post("/conversing")
+@router.post("/conversation/conversing")
 async def get_messaged_users(
     request: Request,
     member_ids: List[str] = Form(...),
@@ -55,7 +56,7 @@ async def get_messaged_users(
 
         
 
-@router.post("/get-messaged-users/", response_model=List[schemas.SharedConversationUser])
+@router.get("/conversation/users", response_model=List[schemas.SharedConversationUser])
 async def get_messaged_users(
     request:Request,
     db: AsyncSession = Depends(get_async_db),
@@ -66,7 +67,7 @@ async def get_messaged_users(
     return users    
 
 
-@router.post("/get-group-conversations/", response_model=List[schemas.SharedConversationGroup])
+@router.post("/conversation/group", response_model=List[schemas.SharedConversationGroup])
 async def get_group_conversations(
     request:Request,
     db: AsyncSession = Depends(get_async_db),
@@ -77,7 +78,7 @@ async def get_group_conversations(
     users = result.mappings().all()  
     return users
 
-@router.post("/create-group-conversation/", response_model=schemas.SharedConversationGroup)
+@router.post("/conversation/groups/create", response_model=schemas.SharedConversationGroup)
 async def create_group_conversation(
     request:Request,
     sender_id: str = Form(...),
@@ -172,26 +173,39 @@ async def join_group_conversation(
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
 
 
-
-
-@router.get("/get-messages/", response_model=List[schemas.MessageOut])
+@router.get("/conversation/{conversation_id}/messages", response_model=List[schemas.MessageOut])
 async def get_messages(
     conversation_id: str,
     db: AsyncSession = Depends(get_async_db)
 ):
     try:
         query = text("""
-            SELECT 
+           SELECT 
             s.id, 
             s.conversation_id, 
             s.sender_id, 
             s.content, 
             s.created_at,
+
+            COALESCE((
+                SELECT STRING_AGG(image_url, ',') 
+                FROM message_images 
+                WHERE message_id = s.id
+            ), '') AS images,
+
+            COALESCE((
+                SELECT STRING_AGG(video_url, ',') 
+                FROM message_videos 
+                WHERE message_id = s.id
+            ), '') AS videos,
+
             (SELECT username FROM users WHERE id = s.sender_id) AS username,
             (SELECT user_image FROM users WHERE id = s.sender_id) AS user_image
-            FROM messages s
-            WHERE s.conversation_id = :conversation_id
-            ORDER BY s.created_at ASC
+
+        FROM messages s
+        WHERE s.conversation_id = :conversation_id
+        GROUP by s.id,s.conversation_id,s.sender_id, s.content, s.created_at
+        ORDER BY s.created_at ASC
         """)
 
         result = await db.execute(query, {"conversation_id": conversation_id})
@@ -201,137 +215,129 @@ async def get_messages(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch messages: {str(e)}")
 
-
-@router.post('/messages/', response_model=schemas.MessageOut)
+@router.post('/conversation/send', response_model=schemas.MessageOut)
 async def send_message(
-    request:Request,
+    request: Request,
     content: str = Form(...),
     member_ids: List[str] = Form(...),
     name: Optional[str] = Form(None),
     is_group: Optional[int] = Form(None),
+    files: Optional[List[UploadFile]] = File(None),
     conversation_id: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_async_db)
 ):
     try:
-        from ..socket_manager import sio,getSocket
-        new_conversation_id = conversation_id
-        edited_member_ids =  member_ids[0].split(",")
-        # Step 1: Create a new conversation if not provided
+        from ..socket_manager import sio, getSocket
         current_user = request.state.user
-        if not conversation_id:
-            columns = []
-            placeholders = []
-            values = {}
+        edited_member_ids = member_ids[0].split(",")
+        new_conversation_id = conversation_id
 
-            if name:
-                columns.append("name")
-                placeholders.append(":name")
-                values["name"] = name
+        image_urls = []
+        video_urls = []
+        generated_names = []
 
-            if is_group is not None:
-                columns.append("is_group")
-                placeholders.append(":is_group")
-                values["is_group"] = is_group
-
-            columns.append("created_at")
-            placeholders.append("NOW()")
-
-            query = f"""
-                INSERT INTO conversations ({', '.join(columns)})
-                VALUES ({', '.join(placeholders)})
-                RETURNING id
-            """
-
-            result = await db.execute(text(query), values)
-            conversation = result.fetchone()
-
-            if not conversation:
-                raise HTTPException(status_code=500, detail="Failed to create conversation")
-
-            new_conversation_id = conversation.id
-
-            # Step 2: Insert members into conversation_members
-            insert_member_query = text("""
-                INSERT INTO conversation_members (conversation_id, user_id)
-                VALUES (:conversation_id, :user_id)
-            """)
-            for uid in edited_member_ids:
-                await db.execute(insert_member_query, {
-                    "conversation_id": str(new_conversation_id),
-                    "user_id": uid
-                })
-
-        # Step 3: Insert the message
-        insert_msg_query = text("""
+        # 1. Insert the base message
+        msg_result = await db.execute(text("""
             INSERT INTO messages (conversation_id, sender_id, content, created_at)
             VALUES (:conversation_id, :sender_id, :content, NOW())
             RETURNING id, conversation_id, sender_id, content, created_at
-        """)
-        result = await db.execute(insert_msg_query, {
+        """), {
             "conversation_id": str(new_conversation_id),
             "sender_id": current_user.get("user_id"),
             "content": content
         })
-
-        row = result.fetchone()
-        
-        get_user_info_query = await db.execute(text("""
-            SELECT user_image 
-            FROM users
-            WHERE id =:user_id
-        """),{
-            "user_id":current_user.get("user_id")
-        })
-        
-        user_image = get_user_info_query.fetchone()
-    
-        await db.commit()
-        
-        # query = text("""
-        #     SELECT id, conversation_id, sender_id, content, created_at
-        #     FROM messages
-        #     WHERE conversation_id = :conversation_id
-        #     ORDER BY created_at ASC
-        # """)
-        
-        # result_ = await db.execute(query, {"conversation_id": str(row.conversation_id)})
-        # messages = result_.fetchall()
-        # print(messages)
-
+        row = msg_result.fetchone()
         if not row:
-            raise HTTPException(status_code=500, detail="Failed to send message")
+            await db.rollback()
+            raise HTTPException(status_code=500, detail="Failed to create message")
+        row = row._mapping
 
-        # Step 4: Emit real-time message if it's a direct chat
-        if not is_group:
-            receiver_ids = [uid for uid in edited_member_ids if uid != current_user.get("reference_id")]
-            if receiver_ids:
-                receiver_id = receiver_ids[0]
-                sid = getSocket(receiver_id)
+        # 2. Process file uploads and insert into your tracking tables
+        if files:
+            for file in files:
+                mimetype = file.content_type.split("/")[0]
+                content_type = file.content_type
+                file_bytes = await file.read()
+                extension = file.filename.split(".")[-1]
+                generated_name = f"plant.disease.detection.{generate_random_string()}.{extension}"
+                generated_names.append(generated_name)
 
-                if sid:
-                   await sio.emit("chat_response", {
-                        "id": str(row.id),
-                        "conversation_id": str(row.conversation_id),
-                        "sender_id": str(row.sender_id),
-                        "content": row.content,
-                        "created_at": row.created_at.isoformat(),
-                        "user_image":user_image
-                    }, to=str(sid))
-        # Step 5: Return message using Pydantic schema
+                file_url = await upload_file_to_storage(current_user.get("user_id"), generated_name, file_bytes, content_type)
+
+                if file_url:
+                    if mimetype == "image":
+                        image_urls.append(file_url)
+                        await db.execute(text("""
+                            INSERT INTO message_images 
+                            (message_id, image_url, filename, user_id, generated_name)
+                            VALUES (:msg_id, :url, :fname, :uid, :gname)
+                        """), {
+                            "msg_id": row["id"],
+                            "url": file_url,
+                            "fname": file.filename,
+                            "uid": current_user.get("user_id"),
+                            "gname": generated_name
+                        })
+                    elif mimetype == "video":
+                        video_urls.append(file_url)
+                        await db.execute(text("""
+                            INSERT INTO message_videos 
+                            (message_id, video_url, filename, user_id, generated_name)
+                            VALUES (:msg_id, :url, :fname, :uid, :gname)
+                        """), {
+                            "msg_id": row["id"],
+                            "url": file_url,
+                            "fname": file.filename,
+                            "uid": current_user.get("user_id"),
+                            "gname": generated_name
+                        })
+
+        # 3. Fetch sender image
+        user_info = await db.execute(text("SELECT user_image FROM users WHERE id = :uid"), {
+            "uid": current_user.get("user_id")
+        })
+        img_row = user_info.fetchone()
+        user_image = img_row.user_image if img_row else None
+
+        await db.commit()
+
+        # 4. Emit via WebSocket to other member(s)
+        receiver_ids = [uid for uid in edited_member_ids if uid != current_user.get("reference_id")]
+        if receiver_ids:
+            sid = getSocket(receiver_ids[0])
+            if sid:
+                await sio.emit("chat_response", {
+                    "id": str(row["id"]),
+                    "conversation_id": str(row["conversation_id"]),
+                    "sender_id": str(row["sender_id"]),
+                    "content": row["content"],
+                    "created_at": row["created_at"].isoformat(),
+                    "image_urls": image_urls,
+                    "video_urls": video_urls,
+                    "user_image": user_image
+                }, to=str(sid))
+
         return schemas.MessageOut(
-            id=str(row.id),
-            conversation_id=str(row.conversation_id),
-            sender_id=str(row.sender_id),
-            content=row.content,
-            created_at=row.created_at
+            id=str(row["id"]),
+            conversation_id=str(row["conversation_id"]),
+            sender_id=str(row["sender_id"]),
+            content=row["content"],
+            image_url=",".join(image_urls) if image_urls else None,
+            video_url=",".join(video_urls) if video_urls else None,
+            created_at=row["created_at"]
         )
 
     except Exception as e:
         await db.rollback()
+        if generated_names:
+            for gen_name in generated_names:
+                try:
+                    await delete_file_from_storage(current_user.get("user_id"), gen_name)
+                except Exception as cleanup_error:
+                    print(f"Failed to delete uploaded file {gen_name}: {cleanup_error}")
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
 
-
-@router.post('/create-conversation', status_code=status.HTTP_201_CREATED)
+@router.post('/conversation/create', status_code=status.HTTP_201_CREATED)
 async def create_conversation(
     request: Request,
     member_ids: List[str] = Form(...),

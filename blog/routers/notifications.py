@@ -10,7 +10,7 @@ from sqlalchemy.sql import tuple_
 
 router = APIRouter()
 
-@router.get('/get-notifications', status_code=status.HTTP_200_OK, response_model=schemas.AllNotifications)
+@router.get('/notifications', status_code=status.HTTP_200_OK, response_model=schemas.AllNotifications)
 async def get_notifications(
     request:Request,
     offset: int = Query(1, ge=1),
@@ -53,7 +53,7 @@ async def get_notifications(
 
 
 
-@router.post('/read-notifications', status_code=status.HTTP_200_OK)
+@router.post('/notifications/read', status_code=status.HTTP_200_OK)
 async def get_notifications(
     request: Request,
     db: AsyncSession = Depends(get_async_db),
