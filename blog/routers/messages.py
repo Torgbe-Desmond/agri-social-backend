@@ -73,7 +73,6 @@ async def get_group_conversations(
     db: AsyncSession = Depends(get_async_db),
 ):  
     current_user = request.state.user
-    print("current_user",current_user)
     result = await db.execute(_get_group_conversations, {"current_user_id": current_user.get("user_id")})
     users = result.mappings().all()  
     return users

@@ -134,8 +134,7 @@ async def get_posts(
         result = await db.execute(count_stmt)
         total_count = result.scalar()
         cal_offset = (offset - 1) * limit
-        result = await db.execute(_get_all_posts, {"offset": cal_offset, "limit": limit,"current_user_id":current_user.get("user_id")})
-    
+        result = await db.execute(_get_all_posts, {"offset": cal_offset, "limit": limit,"current_user_id":current_user.get("user_id")})    
         if result:
             posts = [dict(row._mapping) for row in result.fetchall()]
             return schemas.AllPost(posts=posts, numb_found=total_count)

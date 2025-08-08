@@ -55,7 +55,9 @@ class GetAllPost(BaseModel):
     created_at: datetime
     likes: int
     saves: int
+    saves: int
     liked:Optional[bool] = None
+    saved:Optional[bool] = None
     saved:Optional[bool] = None
     user_id:UUID
     has_video:Optional[int]

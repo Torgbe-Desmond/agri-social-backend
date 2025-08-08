@@ -15,6 +15,7 @@ router = APIRouter()
 @router.get('/comments/{post_id}', status_code=status.HTTP_200_OK, response_model = schemas.AllComment)
 async def get_comments(post_id: str,request:Request, db: AsyncSession = Depends(get_async_db)):
     try:
+        current_user = request.state.user
         # Step 1: Get total comment count for the post
         current_user = request.state.user
         count_stmt = text("""
@@ -42,6 +43,7 @@ async def get_comments(post_id: str,request:Request, db: AsyncSession = Depends(
                 "replies": row.replies,
                 "created_at": row.created_at,
                 "user_image": row.user_image,
+                "liked":row.liked,
                 "parent_id": str(row.parent_id) if row.parent_id else None,
             }
             for row in rows
@@ -60,6 +62,7 @@ async def get_comments(post_id: str,request:Request, db: AsyncSession = Depends(
 @router.get('/comments/{comment_id}/replies', status_code=status.HTTP_200_OK, response_model = schemas.AllComment)
 async def get_replies(comment_id: str,request:Request, db: AsyncSession = Depends(get_async_db)):
     try:
+        current_user = request.state.user
         # Step 1: Get total comment count for the post
         current_user = request.state.user
         count_stmt = text("""
@@ -87,6 +90,7 @@ async def get_replies(comment_id: str,request:Request, db: AsyncSession = Depend
                 "replies": row.replies,
                 "created_at": row.created_at,
                 "user_image": row.user_image,
+                "liked":row.liked,
                 "parent_id": str(row.parent_id) if row.parent_id else None,
             }
             for row in rows
@@ -119,41 +123,60 @@ async def get_comment(comment_id: str,request:Request, db: AsyncSession = Depend
 @router.post('/comments/{comment_id}/like', status_code=status.HTTP_200_OK)
 async def toggle_comment_like(
     comment_id: str,
-    request:Request,
+    request: Request,
     post_owner: str = Form(...),
     db: AsyncSession = Depends(get_async_db)
 ):
     try:
         current_user = request.state.user
-        result = await db.execute(text("SELECT content FROM comments WHERE id = :comment_id"),
-                                  {"comment_id": comment_id})
+
+        # Check if the comment exists
+        result = await db.execute(
+            text("SELECT content FROM comments WHERE id = :comment_id"),
+            {"comment_id": comment_id}
+        )
         comment = result.fetchone()
         if not comment:
             raise HTTPException(status_code=404, detail="Comment not found.")
 
-        like_check = await db.execute(text("SELECT 1 FROM comment_likes WHERE user_id = :user_id AND comment_id = :comment_id"),
-                                      {"user_id": current_user.get("user_id"), "comment_id": comment_id})
+        # Check if the current user already liked the comment
+        like_check = await db.execute(
+            text("SELECT 1 FROM comment_likes WHERE user_id = :user_id AND comment_id = :comment_id"),
+            {"user_id": current_user.get("user_id"), "comment_id": comment_id}
+        )
         liked = like_check.fetchone()
 
         if liked:
-            await db.execute(text("DELETE FROM comment_likes WHERE user_id = :user_id AND comment_id = :comment_id"),
-                             {"user_id": current_user.get("user_id"), "comment_id": comment_id})
-            await db.execute(text("""
-                DELETE FROM notifications
-                WHERE actor_id = :user_id AND entity_type = 'comment' AND entity_id = :comment_id AND type = 'like'
-            """), {"user_id": current_user.get("user_id"), "comment_id": comment_id})
+            # Remove the like and related notification
+            await db.execute(
+                text("DELETE FROM comment_likes WHERE user_id = :user_id AND comment_id = :comment_id"),
+                {"user_id": current_user.get("user_id"), "comment_id": comment_id}
+            )
+            await db.execute(
+                text("""
+                    DELETE FROM notifications
+                    WHERE actor_id = :user_id AND entity_type = 'comment'
+                    AND entity_id = :comment_id AND type = 'like'
+                """),
+                {"user_id": current_user.get("user_id"), "comment_id": comment_id}
+            )
             liked = False
         else:
-            await db.execute(text("""
-                INSERT INTO comment_likes (id, comment_id, user_id, created_at)
-                VALUES (:id, :comment_id, :user_id, GETDATE())
-            """), {"comment_id": comment_id, "user_id": current_user.get("user_id")})
+            # Insert the like
+            await db.execute(
+                text("""
+                    INSERT INTO comment_likes (comment_id, user_id, created_at)
+                    VALUES (:comment_id, :user_id, NOW())
+                """),
+                {"comment_id": comment_id, "user_id": current_user.get("user_id")}
+            )
 
+            # Insert a notification for the like
             await db.execute(text("""
                 INSERT INTO notifications (
-                    id, user_id, actor_id, type, entity_type, entity_id, message, is_read, created_at
+                    user_id, actor_id, type, entity_type, entity_id, message, is_read, created_at
                 ) VALUES (
-                    :id, :user_id, :actor_id, 'like', 'comment', :entity_id, :message, 0, GETDATE()
+                    :user_id, :actor_id, 'like', 'comment', :entity_id, :message, 0, NOW()
                 )
             """), {
                 "user_id": post_owner,
@@ -165,6 +188,7 @@ async def toggle_comment_like(
 
         await db.commit()
         return {"comment_id": comment_id, "liked": liked}
+
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
