@@ -20,8 +20,6 @@ from ..utils.firebase_interactions import (
 )
 # from ..utils.localDependent import predict_image_class
 from blog.database import get_db, get_async_db
-import torch
-import torchvision.transforms as transforms
 load_dotenv()
 router = APIRouter()
 
