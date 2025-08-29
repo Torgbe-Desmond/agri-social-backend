@@ -86,21 +86,7 @@ SELECT
 
     COALESCE(u.user_image, '') AS user_image,
 
-
-    COALESCE(u.user_image, '') AS user_image,
-
     EXISTS (
-        SELECT 1 
-        FROM post_likes  
-        WHERE post_id = p.id AND user_id = :current_user_id
-    ) AS liked,
-
-    EXISTS (
-        SELECT 1 
-        FROM saved_posts  
-        WHERE post_id = p.id AND user_id = :current_user_id
-    ) AS saved,
-
         SELECT 1 
         FROM post_likes  
         WHERE post_id = p.id AND user_id = :current_user_id
@@ -113,27 +99,18 @@ SELECT
     ) AS saved,
 
     (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) AS likes,
-
     (SELECT COUNT(*) FROM saved_posts WHERE post_id = p.id) AS saves,
-
-
-    (SELECT COUNT(*) FROM saved_posts WHERE post_id = p.id) AS saves,
-
     (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comments,
-
-
     (SELECT image_url FROM post_images WHERE post_id = p.id LIMIT 1) AS images,
-
-
     (SELECT video_url FROM post_videos WHERE post_id = p.id LIMIT 1) AS videos,
+       COALESCE((
+        SELECT STRING_AGG(tag_name, ',') 
+        FROM tags 
+        WHERE post_id = p.id
+    ), '') AS tags,
 
     u.username
-
-
-    u.username
-
 FROM posts p
-JOIN users u ON u.id = p.user_id
 JOIN users u ON u.id = p.user_id
 WHERE p.id IN (
     SELECT unnest(string_to_array(:PostIds, ',')::uuid[])
@@ -141,9 +118,8 @@ WHERE p.id IN (
 ORDER BY p.created_at DESC
 OFFSET :offset
 LIMIT :limit;
-
-
 """)
+
 
 # Get product history by user
 _get_product_history = text("""
@@ -313,59 +289,6 @@ FROM posts p
 JOIN users u ON u.id = p.user_id
 WHERE p.id = :PostId;
 
-   SELECT 
-    p.id AS post_id,
-    p.content,
-    p.created_at,
-    p.user_id,
-    p.has_video,
-
-    COALESCE(u.user_image, '') AS user_image,
-    u.username,
-
-    (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) AS likes,
-
-    EXISTS (
-        SELECT 1 
-        FROM post_likes  
-        WHERE post_id = p.id AND user_id = :current_user_id
-    ) AS liked,
-
-    (SELECT COUNT(*) FROM saved_posts WHERE post_id = p.id) AS saves,
-
-    EXISTS (
-        SELECT 1 
-        FROM saved_posts  
-        WHERE post_id = p.id AND user_id = :current_user_id
-    ) AS saved,
-
-    (SELECT COUNT(*) 
-     FROM comments 
-     WHERE post_id = p.id AND parent_id IS NULL
-    ) AS comments,
-
-    COALESCE((
-        SELECT STRING_AGG(image_url, ',') 
-        FROM post_images 
-        WHERE post_id = p.id
-    ), '') AS images,
-
-    COALESCE((
-        SELECT STRING_AGG(tag_name, ',') 
-        FROM tags 
-        WHERE post_id = p.id
-    ), '') AS tags,
-
-    COALESCE((
-        SELECT STRING_AGG(video_url, ',') 
-        FROM post_videos 
-        WHERE post_id = p.id
-    ), '') AS videos
-
-FROM posts p
-JOIN users u ON u.id = p.user_id
-WHERE p.id = :PostId;
-
 """)
 
 # Get notifications by user ID
@@ -409,6 +332,7 @@ _get_comments = text("""
         c.user_id,
         c.content,
         c.created_at,
+        c.has_video,
         COALESCE(u.user_image, '') AS user_image,
         c.parent_id,
          EXISTS (
@@ -448,6 +372,7 @@ _get_replies = text("""
         c.user_id,
         c.content,
         c.created_at,
+        c.has_video,
         COALESCE(u.user_image, '') AS user_image,
         c.parent_id,
          EXISTS (
@@ -659,13 +584,10 @@ _get_all_streams = text("""
 
 FROM posts p
 JOIN users u ON u.id = p.user_id
-WHERE p.has_video = 1
+WHERE p.has_video = 1 OR p.videos IS NOT NULL
 ORDER BY p.created_at DESC
 OFFSET :offset ROWS
-FETCH NEXT :limit ROWS ONLY;
-
-   
-
+FETCH NEXT :limit ROWS ONLY 
 """)
 
 # Get recommended post (sample pattern)

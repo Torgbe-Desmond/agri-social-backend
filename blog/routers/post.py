@@ -64,7 +64,6 @@ async def get_post(post_id: str,request:Request,db: AsyncSession = Depends(get_a
         raise HTTPException(status_code=500, detail=str(e))
     
 
-
    
 @router.get('/get-post-interactions/{post_id}',)
 async def get_single_post(post_id: str, db: AsyncSession = Depends(get_async_db)):
@@ -235,9 +234,8 @@ async def create_post(
         await db.commit()
 
         # Fetch and return the newly created post using existing query
-        result = await db.execute(
-            text("""SELECT * FROM get_single_post(:currentPostId)"""),  # Replace with your actual query
-            {"currentPostId": str(post_id)}
+        result = await db.execute(_get_single_post, 
+            {"currentPostId": str(post_id),"current_user_id":current_user.get("user_id")}
         )
         created_post = result.fetchone()
 
@@ -250,7 +248,7 @@ async def create_post(
             user_id=created_post.user_id,
             has_video=created_post.has_video,
             comments=created_post.comments,
-            username=created_post.username,
+            username=created_post.username,     
             images=created_post.images,
             tags=created_post.tags,
             videos=created_post.videos,
@@ -303,7 +301,7 @@ async def delete_post(post_id: str, db: AsyncSession = Depends(get_async_db)):
 
 
 @router.get('/users/{user_id}/posts', response_model=schemas.AllPost)
-async def post_history(
+async def get_post_history_user(
     user_id, 
     offset: int = Query(1, ge=1),         # Start from page 1
     limit: int = Query(10, gt=0),         # Must request at least 1 item

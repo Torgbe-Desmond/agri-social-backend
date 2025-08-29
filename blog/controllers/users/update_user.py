@@ -1,4 +1,4 @@
-from fastapi import  HTTPException, Form, Depends, status
+from fastapi import  HTTPException, Form, Depends, status,Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from blog.database import get_async_db
@@ -6,9 +6,9 @@ from .route import userRoute
 from typing import Optional
 import uuid
 
-@userRoute.put('/update/{user_id}')
+@userRoute.put('/update')
 async def update_user(
-    user_id: str,
+    request:Request,
     username: Optional[str] = Form(None),
     email: Optional[str] = Form(None),
     city: Optional[str] = Form(None),
@@ -19,8 +19,9 @@ async def update_user(
     db: AsyncSession = Depends(get_async_db),
 ):
     try:
+        current_user = request.state.user         
         fields_to_update = []
-        values = {"user_id": user_id}
+        values = {"user_id": current_user.get("user_id")}
         if username:
             fields_to_update.append("username = :username")
             values["username"] = username
@@ -55,14 +56,14 @@ async def update_user(
                     SELECT 1 FROM user_interests 
                     WHERE user_id = :user_id AND interest = :interest
                 """)
-                result = await db.execute(check_stmt, {"user_id": user_id, "interest": interest})
+                result = await db.execute(check_stmt, {"user_id": current_user.get("user_id"), "interest": interest})
                 if not result.fetchone():
                     interest_id = str(uuid.uuid4())
                     insert_stmt = text("""
                         INSERT INTO user_interests (id, user_id, interest, created_at)
                         VALUES (:id, :user_id, :interest, GETDATE())
                     """)
-                    await db.execute(insert_stmt, {"id": interest_id, "user_id": user_id, "interest": interest})
+                    await db.execute(insert_stmt, {"id": interest_id, "user_id": current_user.get("user_id"), "interest": interest})
 
         await db.commit()
         return {"message": "User updated successfully."}

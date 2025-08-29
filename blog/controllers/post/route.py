@@ -1,2 +1,2 @@
 from fastapi import APIRouter
-postRoute = APIRouter()
+postRoute = APIRouter(prefix="/posts")

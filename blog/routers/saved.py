@@ -4,7 +4,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 from datetime import datetime
 from uuid import UUID
-
 from .. import schemas
 from blog.database import get_async_db
 from ..utils.stored_procedure_strings import _get_saved_posts
@@ -44,7 +43,8 @@ async def saved_history(
         result = await db.execute(_get_saved_posts, {
             "PostIds": joined_post_ids,
             "offset": cal_offset,
-            "limit": limit
+            "limit": limit,
+            "current_user_id":current_user.get("user_id")
         })
 
         saved_posts = result.fetchall()
@@ -59,8 +59,6 @@ async def saved_history(
             status_code=500,
             detail=f"Failed to fetch saved history: {str(e)}"
         )
-
-# ✅ 2. These come AFTER the static route
 @router.post("/saves/{post_id}/save", status_code=status.HTTP_200_OK)
 async def toggle_save(
     post_id: UUID,  # 🔒 Accept only valid UUIDs
@@ -68,36 +66,69 @@ async def toggle_save(
     db: AsyncSession = Depends(get_async_db)
 ):
     try:
+        from ..socket_manager import sio, getSocket
+        user_id = request.state.user.get("user_id")  # actor
         saved = None
-        user_id = request.state.user.get("user_id")
+
+        # Params for queries
         params = {"user_id": user_id, "post_id": str(post_id)}
 
         # Check if post is already saved
         saved_post_stmt = text("""
-            SELECT * FROM saved_posts WHERE user_id = :user_id AND post_id = :post_id
+            SELECT * FROM saved_posts 
+            WHERE user_id = :user_id AND post_id = :post_id
         """)
         result = await db.execute(saved_post_stmt, params)
         saved_post = result.fetchone()
 
         if saved_post:
+            # Unsave
             saved = False
             await db.execute(text("""
-                DELETE FROM saved_posts WHERE user_id = :user_id AND post_id = :post_id
+                DELETE FROM saved_posts 
+                WHERE user_id = :user_id AND post_id = :post_id
             """), params)
         else:
+            # Save
             saved = True
             await db.execute(text("""
                 INSERT INTO saved_posts (post_id, user_id, created_at)
                 VALUES (:post_id, :user_id, CURRENT_TIMESTAMP)
             """), params)
 
+        # ✅ Commit before emitting
         await db.commit()
+
+        # Fetch the post owner (so we can notify them if needed)
+        owner_stmt = text("""
+            SELECT user_id FROM posts WHERE id = :post_id
+        """)
+        result = await db.execute(owner_stmt, {"post_id": str(post_id)})
+        row = result.fetchone()
+        post_owner_id = row.user_id if row else None
+
+        # ✅ Emit to Socket.IO
+        sid = getSocket(str(user_id))  # socket id of actor
+        await sio.emit(
+            "foot_notifications",
+            {
+                "actor_id": str(user_id),     
+                "owner_id": str(post_owner_id),
+                "entity_type": "post",
+                "type": "bookmark",
+                "entity_id": str(post_id),
+                "saved": saved,
+            },
+            room="post_footer_notifications",
+            skip_sid=sid  
+        )
+
         return {"post_id": str(post_id), "saved": saved}
 
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-
+    
 @router.delete("/saves/{post_id}/unsave", status_code=status.HTTP_200_OK)
 async def delete_saved(
     request: Request,

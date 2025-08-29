@@ -79,7 +79,6 @@ async def get_notifications(
             stmt,
             {
                 "ids": notification_id,
-                "user_id": current_user.get("user_id"),
                 "is_read": 1
             }
         )

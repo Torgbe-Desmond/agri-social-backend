@@ -2,11 +2,11 @@ from fastapi import  HTTPException, Form, Depends, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from blog.database import get_async_db
-from .route import userRoute
+from .route import authRoute
 import bcrypt
 from ...middleware.authMiddleware import create_access_token,verify_access_token
 
-@userRoute.post("/login")
+@authRoute.post("/login")
 async def login(
     email: str = Form(...),
     password: str = Form(...),
@@ -23,16 +23,17 @@ async def login(
             raise HTTPException(status_code=401, detail="Wrong email or password")
 
         # ✅ Generate token with user ID and username
-        token = create_access_token(data={"user_id": user.id, "username": user.username})
+        token = create_access_token(data={"user_id": str(user.id), "username": user.username, "reference_id":str(user.reference_id)})
 
         return {
             "access_token": token,
             "token_type": "bearer",
             "user": {
-                "id": user.id,
+                "id":str(user.id),
                 "username": user.username,
                 "email": user.email,
                 "user_image": user.user_image,
+                "reference_id":str(user.reference_id)
             }
         }
 

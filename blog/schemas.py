@@ -1,7 +1,17 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List,Any
 from datetime import datetime
 from uuid import UUID
+
+
+# ---------------------- Succes ----------------------
+class SuccessResponse(BaseModel):
+    success: bool
+    message: str
+    data: Optional[Any] = None
+
+    class Config:
+        orm_mode = True
 
 
 # ---------------------- Users ----------------------
@@ -112,7 +122,7 @@ class Prediction(BaseModel):
     generated_name:Optional[str] = None
 
 class AllPrediction(BaseModel):
-     notifications:List[Prediction]
+     predictions:List[Prediction]
      numb_found:int
     
 # ---------------------- PredictionHistory ----------------------
@@ -143,6 +153,7 @@ class Comment(BaseModel):
     saved:Optional[bool] = None
     videos:Optional[str] = None
     images:Optional[str] = None
+    has_video:Optional[int] = None
     username:str
     content: str
     tags:Optional[str] = None
@@ -259,6 +270,15 @@ class SharedConversationGroup(BaseModel):
     
 
 
+# ---------------------- Reviews ----------------------
 
+class Reviews(BaseModel):
+    id:UUID
+    content:str 
+    user_id:UUID
+    product_id:UUID
+    created_at:datetime
 
-
+class AllReviews(BaseModel):
+    reviews:List[Reviews]
+    numb_found:int

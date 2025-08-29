@@ -5,8 +5,6 @@ from dotenv import load_dotenv
 load_dotenv()
 import os
 
-
-
 # Replace this with your actual Supabase password or use an environment variable
 DATABASE_URL = "postgresql+asyncpg://postgres.qolhywmalugdwssrxyrl:qHunYTMEUcnSC7i3@aws-0-eu-west-1.pooler.supabase.com:5432/postgres"
 # ---------------- SYNC (optional, for admin scripts or metadata reflection) ----------------
@@ -25,7 +23,17 @@ def get_db():
         db.close()
 
 # ---------------- ASYNC (preferred for FastAPI routes) ----------------
-async_engine = create_async_engine(DATABASE_URL,echo=True,connect_args={"statement_cache_size": 0})  # ✅ CRITICAL for PgBouncer compatibility)
+# async_engine = create_async_engine(DATABASE_URL,echo=True,connect_args={"statement_cache_size": 0})  # ✅ CRITICAL for PgBouncer compatibility)
+
+async_engine = create_async_engine(
+    DATABASE_URL,
+    echo=True,
+    connect_args={"statement_cache_size": 0,"timeout": 60},  # 🚀 disables prepared statements
+    pool_pre_ping=True,
+    pool_recycle=1800,
+    pool_size=5,
+    max_overflow=10,
+)
 
 async_session = async_sessionmaker(
     bind=async_engine,

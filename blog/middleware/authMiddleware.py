@@ -1,20 +1,30 @@
 # utils/jwt_handler.py
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
-
-# Configuration (use environment variables in production!)
-SECRET_KEY = "your-secret-key"
 ALGORITHM = "HS256"
+import os
 ACCESS_TOKEN_EXPIRE_MINUTES = 60  # 1 hour
 from fastapi import Request, HTTPException, status
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+from dotenv import load_dotenv
+load_dotenv()
 
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        # Allow unauthenticated access to login or register endpoints
-        public_paths = ["/auth/login", "/auth/register"]
+        # Public paths that should allow unauthenticated access
+        public_paths = [
+            "/auth/login",
+            "/auth/register",
+            "/auth/send-verification-email"
+        ]
+        
+        # Skip auth for exact matches
         if request.url.path in public_paths:
+            return await call_next(request)
+        
+        # Skip auth for paths starting with this prefix
+        if request.url.path.startswith("/auth/generate-verification-token"):
             return await call_next(request)
 
         auth_header = request.headers.get("Authorization")
@@ -26,7 +36,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         token = auth_header.split(" ")[1]
         try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            payload = jwt.decode(token,os.getenv("SECRET_KEY"), algorithms=[ALGORITHM])
             request.state.user = payload
         except JWTError:
             return JSONResponse(
@@ -48,15 +58,14 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode.update({"exp": expire})
 
     # Create token
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, os.getenv("SECRET_KEY"), algorithm=ALGORITHM)
     return encoded_jwt
+
 
 def verify_access_token(token: str):
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, os.getenv("SECRET_KEY"), algorithms=[ALGORITHM])
         return payload
     except JWTError:
         return None
 
-
-# "(sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.ConnectionDoesNotExistError'>: connection was closed in the middle of operation\n[SQL: SELECT 1 FROM users WHERE username = $1]\n[parameters: ('badboy',)]\n(Background on this error at: https://sqlalche.me/e/20/dbapi)"
