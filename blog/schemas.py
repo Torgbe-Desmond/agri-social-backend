@@ -277,6 +277,8 @@ class Reviews(BaseModel):
     content:str 
     user_id:UUID
     product_id:UUID
+    username:str
+    user_image:Optional[str] = None
     created_at:datetime
 
 class AllReviews(BaseModel):

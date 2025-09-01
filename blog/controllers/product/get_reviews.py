@@ -15,49 +15,43 @@ async def get_reviews(
     db: AsyncSession = Depends(get_async_db)
 ):
     try:
-        # Count the number of reviews
-        count_stmt = text("""
-            SELECT COUNT(*)
-            FROM reviews r
-            WHERE r.product_id = :product_id
-        """)
-
-        count_result = await db.execute(count_stmt, {"product_id": product_id})
-        total_count = count_result.scalar() or 0
-
-        # Pagination
-        cal_offset = offset * limit
-
-        # Fetch reviews
-        result = await db.execute(
-            text("""
-                SELECT 
-                    r.id,
-                    r.content,
-                    r.created_at,
-                    r.user_id,
-                    r.product_id
-                FROM reviews r
-                JOIN products p ON p.id = r.product_id
-                WHERE r.product_id = :product_id
-                ORDER BY r.created_at DESC
-                OFFSET :offset ROWS
-                FETCH NEXT :limit ROWS ONLY
-            """),
-            {
-                "product_id": product_id,
-                "offset": cal_offset,
-                "limit": limit
-            }
-        )
-
-        reviews = [dict(row._mapping) for row in result.fetchall()]
-
-        return schemas.AllReviews(
-            reviews=reviews,
-            numb_found=total_count
-        )
-
+      # Count the number of reviews
+      count_stmt = text("""
+          SELECT COUNT(*)
+          FROM review r
+          WHERE r.product_id = :product_id
+      """)
+      count_result = await db.execute(count_stmt, {"product_id": product_id})
+      total_count = count_result.scalar() or 0
+      # Pagination
+      cal_offset = offset * limit
+      # Fetch reviews
+      result = await db.execute(
+          text("""
+              SELECT 
+                  r.id,
+                  r.content,
+                  r.created_at,
+                  r.user_id,
+                  r.product_id
+              FROM review r
+              WHERE r.product_id = :product_id
+              ORDER BY r.created_at DESC
+              OFFSET :offset ROWS
+              FETCH NEXT :limit ROWS ONLY;
+          """),
+          {
+              "product_id": product_id,
+              "offset": cal_offset,
+              "limit": limit
+          }
+      )
+      
+      reviews = [dict(row._mapping) for row in await result.fetchall()]
+      
+      return schemas.AllReviews(
+          reviews=reviews,
+          numb_found=total_count
+      )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    

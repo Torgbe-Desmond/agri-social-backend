@@ -17,7 +17,7 @@ router = APIRouter()
 
 
 
-@router.get('/user/authenticated')
+@router.get('/user/authenticated'   )
 async def get_profile_by_user_id():    
     return {"status":True} 
 

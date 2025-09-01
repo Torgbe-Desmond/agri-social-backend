@@ -303,8 +303,8 @@ async def delete_post(post_id: str, db: AsyncSession = Depends(get_async_db)):
 @router.get('/users/{user_id}/posts', response_model=schemas.AllPost)
 async def get_post_history_user(
     user_id, 
-    offset: int = Query(1, ge=1),         # Start from page 1
-    limit: int = Query(10, gt=0),         # Must request at least 1 item
+    offset: int = Query(1, ge=1),        
+    limit: int = Query(10, gt=0),        
     db: AsyncSession = Depends(get_async_db)):
     try:
                 
@@ -331,3 +331,7 @@ async def get_post_history_user(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching post history: {str(e)}")
+    
+
+
+

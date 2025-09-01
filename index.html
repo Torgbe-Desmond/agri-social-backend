@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Dependency Manager</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background: #f8fafc;
+        padding: 20px;
+        color: #333;
+      }
+      h1,
+      h2 {
+        color: #1e293b;
+      }
+      form {
+        margin-bottom: 20px;
+        background: #fff;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+      }
+      input,
+      button {
+        padding: 8px;
+        margin: 5px;
+        border-radius: 6px;
+        border: 1px solid #cbd5e1;
+      }
+      button {
+        background: #2563eb;
+        color: white;
+        cursor: pointer;
+        border: none;
+      }
+      button:hover {
+        background: #1e40af;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 25px;
+        background: #fff;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+      }
+      th,
+      td {
+        border-bottom: 1px solid #e2e8f0;
+        padding: 10px;
+        text-align: left;
+      }
+      th {
+        background: #f1f5f9;
+        font-weight: bold;
+      }
+      tr:hover {
+        background: #f9fafb;
+      }
+      .history {
+        font-size: 0.9em;
+        color: #475569;
+      }
+      .delete-btn {
+        background: #dc2626;
+      }
+      .delete-btn:hover {
+        background: #991b1b;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>📦 Dependency Manager</h1>
+
+    <form onsubmit="addDependency(event)">
+      <input type="text" id="pkgName" placeholder="Package name" required />
+      <input
+        type="text"
+        id="pkgVersion"
+        placeholder="Version (default latest)"
+      />
+      <label
+        ><input type="radio" name="depType" value="global" checked />
+        Global</label
+      >
+      <label><input type="radio" name="depType" value="local" /> Local</label>
+      <button type="submit">Add</button>
+    </form>
+
+    <h2>🌍 Global Dependencies</h2>
+    <table id="globalTable">
+      <thead>
+        <tr>
+          <th>Package</th>
+          <th>Version</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <h2>🔒 Private (Local) Dependencies</h2>
+    <table id="localTable">
+      <thead>
+        <tr>
+          <th>Package</th>
+          <th>Version</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <h2>📜 Installation History</h2>
+    <table id="historyTable">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Type</th>
+          <th>Installed</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <script>
+      const API = "http://localhost:5000";
+
+      async function loadDependencies() {
+        const response = await fetch(`${API}/dependencies`);
+        const data = await response.json();
+
+        const globalBody = document.querySelector("#globalTable tbody");
+        const localBody = document.querySelector("#localTable tbody");
+        const historyBody = document.querySelector("#historyTable tbody");
+        globalBody.innerHTML = "";
+        localBody.innerHTML = "";
+        historyBody.innerHTML = "";
+
+        // Global deps
+        for (const [pkg, version] of Object.entries(data.dependencies)) {
+          const row = document.createElement("tr");
+          row.innerHTML = `
+          <td>${pkg}</td>
+          <td>${version}</td>
+          <td><button class="delete-btn" onclick="deleteDependency('global','${pkg}')">Delete</button></td>
+        `;
+          globalBody.appendChild(row);
+        }
+
+        // Local deps
+        for (const [pkg, version] of Object.entries(
+          data.private_dependencies
+        )) {
+          const row = document.createElement("tr");
+          row.innerHTML = `
+          <td>${pkg}</td>
+          <td>${version}</td>
+          <td><button class="delete-btn" onclick="deleteDependency('local','${pkg}')">Delete</button></td>
+        `;
+          localBody.appendChild(row);
+        }
+
+        // History log
+        for (const record of data.history.slice().reverse()) {
+          // newest first
+          const row = document.createElement("tr");
+          row.innerHTML = `
+          <td>${new Date(record.date).toLocaleDateString()}</td>
+          <td>${record.type}</td>
+          <td class="history">${record.installed.join(", ")}</td>
+        `;
+          historyBody.appendChild(row);
+        }
+      }
+
+      async function deleteDependency(type, name) {
+        if (!confirm(`Remove ${name} from ${type}?`)) return;
+        await fetch(`${API}/dependencies/${type}/${name}`, {
+          method: "DELETE",
+        });
+        loadDependencies();
+      }
+
+      async function addDependency(event) {
+        event.preventDefault();
+        const name = document.getElementById("pkgName").value;
+        const version = document.getElementById("pkgVersion").value || "latest";
+        const type = document.querySelector(
+          "input[name=depType]:checked"
+        ).value;
+
+        await fetch(
+          `${API}/dependencies?name=${encodeURIComponent(
+            name
+          )}&version=${encodeURIComponent(version)}&dep_type=${type}`,
+          {
+            method: "POST",
+          }
+        );
+
+        document.getElementById("pkgName").value = "";
+        document.getElementById("pkgVersion").value = "";
+        loadDependencies();
+      }
+
+      loadDependencies();
+    </script>
+  </body>
+</html>
